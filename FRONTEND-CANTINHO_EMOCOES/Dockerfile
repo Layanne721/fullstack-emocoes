@@ -1,28 +1,28 @@
-# Estágio de Construção (Build)
-FROM node:18-alpine as build-stage
+# Estágio de Build (Atualizado para Node 22)
+FROM node:22-alpine as build-stage
 
 WORKDIR /app
 
-# Instala dependências
+# Copia dependências e instala
 COPY package*.json ./
 RUN npm install
 
-# Copia o código e constrói o site
+# Copia todo o código e faz o build
 COPY . .
 
-# Recebe a URL do backend via argumento
+# Argumento de build para injetar a URL da API
 ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
-# Estágio de Produção (Servidor Nginx)
+# Estágio de Produção (Nginx)
 FROM nginx:stable-alpine as production-stage
 
-# Copia os arquivos construídos para o servidor
+# Copia os arquivos compilados do estágio anterior
 COPY --from=build-stage /app/dist /usr/share/nginx/html
 
-# Copia a configuração do Nginx (arquivo abaixo)
+# Copia nossa configuração personalizada do Nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
