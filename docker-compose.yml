@@ -8,8 +8,8 @@ services:
     restart: always
     environment:
       POSTGRES_DB: cantinho
-      POSTGRES_USER: layanne
-      POSTGRES_PASSWORD: Ud8NRpbMSCvBWi9hMeR9T9IsSvrbcSGG # Troque por uma senha forte
+      POSTGRES_USER: layanne   # Usuário definido na criação
+      POSTGRES_PASSWORD: Ud8NRpbMSCvBWi9hMeR9T9IsSvrbcSGG
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -23,17 +23,16 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Sobrescreve as configs do application.properties para usar o DB local
+      # Sobrescreve as configs para usar o DB local
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/cantinho
-      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_USERNAME: layanne  # CORRIGIDO: Deve ser igual ao do banco acima
       SPRING_DATASOURCE_PASSWORD: Ud8NRpbMSCvBWi9hMeR9T9IsSvrbcSGG
-      # Configurações de E-mail (mantenha ou use variáveis)
+      # Configurações de E-mail
       SPRING_MAIL_USERNAME: ytmesjajaneiro@gmail.com
       SPRING_MAIL_PASSWORD: oodlgktopiiujunh
-      # Define a URL do Frontend para o CORS e Links de E-mail
+      # URL do Frontend
       APP_FRONTEND_URL: http://18.229.131.10
     volumes:
-      # Persistir uploads de imagens fora do container
       - ./uploads:/app/uploads
     depends_on:
       - db
