@@ -4,17 +4,43 @@ services:
   app:
     container_name: cantinho_backend
     image: cantinho_backend:latest
-    build: .
+    # Adicionar contexto de build explícito
+    build: 
+      context: ./BACKEND-CANTINHO_EMOCOES
+      dockerfile: Dockerfile
     ports:
+      # Mapeia a porta 8080 do host para a porta 8080 do container
       - "8080:8080"
     environment:
+      # Sobrescreve a porta do Spring Boot para 8080, alinhando com o Dockerfile e ports
+      - PORT=8080
+      # Configurações para o banco de dados interno (PostgreSQL do Docker Compose)
       - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/cantinho_db
       - SPRING_DATASOURCE_USERNAME=postgres
-      # This password must match the one in the db service below
+      # Essa senha deve ser igual à do serviço 'db' abaixo
       - SPRING_DATASOURCE_PASSWORD=minhasenha123 
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
     depends_on:
       - db
+    networks:
+      - cantinho-network
+
+  web:
+    container_name: cantinho_frontend
+    image: cantinho_frontend:latest
+    # NOVO: Serviço de frontend (Vue/Vite + Nginx)
+    build:
+      context: ./FRONTEND-CANTINHO_EMOCOES
+      dockerfile: Dockerfile
+      args:
+        # IMPORTANTE: Use o IP público da sua VPS e a porta do backend (8080)
+        # O valor será injetado como VITE_API_URL no build.
+        VITE_API_URL: http://54.233.143.245:8080 
+    ports:
+      # Mapeia a porta 80 do host (acesso padrão HTTP) para a porta 80 do Nginx
+      - "80:80"
+    depends_on:
+      - app # Garante que o backend suba antes do frontend
     networks:
       - cantinho-network
 
@@ -25,7 +51,7 @@ services:
     environment:
       - POSTGRES_DB=cantinho_db
       - POSTGRES_USER=postgres
-      # This password must match the one in the app service above
+      # Essa senha deve ser igual à do serviço 'app' acima
       - POSTGRES_PASSWORD=minhasenha123 
     ports:
       - "5432:5432"
