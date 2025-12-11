@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Estilos Padrão (Suave) */
+body {
+  font-family: 'Nunito', sans-serif;
+  background-color: #FDFBF7; /* Fundo Creme Suave Padrão */
+  color: #4A4A4A;
+  transition: background-color 0.3s, color 0.3s;
+  min-height: 100vh;
+}
+
+/* --- MODO ALTO CONTRASTE (Acessibilidade) --- */
+body.high-contrast {
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+}
+
+body.high-contrast * {
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+  border-color: #FFFF00 !important; /* Bordas Amarelas para destaque */
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+/* Exceções para Botões e Inputs no Alto Contraste */
+body.high-contrast button, 
+body.high-contrast a.button-like {
+  background-color: #FFFF00 !important; /* Botões Amarelos */
+  color: #000000 !important; /* Texto Preto */
+  border: 2px solid #FFFFFF !important;
+  font-weight: 900 !important;
+}
+
+body.high-contrast input,
+body.high-contrast select {
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+  border: 2px solid #FFFFFF !important;
+}
+
+body.high-contrast ::placeholder {
+  color: #BBBBBB !important;
+}
+
+/* Remove gradientes e decorações no modo alto contraste */
+body.high-contrast .absolute,
+body.high-contrast .blur-3xl {
+  display: none !important;
+}
