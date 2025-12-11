@@ -1,55 +1,42 @@
 version: '3.8'
 
 services:
-  # --- Banco de Dados PostgreSQL ---
-  db:
-    image: postgres:15-alpine
-    container_name: cantinho_db
-    restart: always
-    environment:
-      POSTGRES_DB: cantinho
-      POSTGRES_USER: layanne   # Usuário definido na criação
-      POSTGRES_PASSWORD: Ud8NRpbMSCvBWi9hMeR9T9IsSvrbcSGG
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  # --- Backend Spring Boot ---
-  backend:
-    build: ./BACKEND-CANTINHO_EMOCOES
+  app:
     container_name: cantinho_backend
-    restart: always
+    image: cantinho_backend:latest
+    build: .
     ports:
       - "8080:8080"
     environment:
-      # Sobrescreve as configs para usar o DB local
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/cantinho
-      SPRING_DATASOURCE_USERNAME: layanne  # CORRIGIDO: Deve ser igual ao do banco acima
-      SPRING_DATASOURCE_PASSWORD: Ud8NRpbMSCvBWi9hMeR9T9IsSvrbcSGG
-      # Configurações de E-mail
-      SPRING_MAIL_USERNAME: ytmesjajaneiro@gmail.com
-      SPRING_MAIL_PASSWORD: oodlgktopiiujunh
-      # URL do Frontend
-      APP_FRONTEND_URL: http://18.229.131.10
-    volumes:
-      - ./uploads:/app/uploads
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/cantinho_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      # This password must match the one in the db service below
+      - SPRING_DATASOURCE_PASSWORD=minhasenha123 
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
     depends_on:
       - db
+    networks:
+      - cantinho-network
 
-  # --- Frontend Vue.js + Nginx ---
-  frontend:
-    build:
-      context: ./FRONTEND-CANTINHO_EMOCOES
-      args:
-        # Passa a URL do backend para o build do Vue
-        VITE_API_URL: http://18.229.131.10:8080
-    container_name: cantinho_frontend
+  db:
+    container_name: cantinho_db
+    image: postgres:15
     restart: always
+    environment:
+      - POSTGRES_DB=cantinho_db
+      - POSTGRES_USER=postgres
+      # This password must match the one in the app service above
+      - POSTGRES_PASSWORD=minhasenha123 
     ports:
-      - "80:80"
-    depends_on:
-      - backend
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cantinho-network
+
+networks:
+  cantinho-network:
+    driver: bridge
 
 volumes:
   postgres_data:
