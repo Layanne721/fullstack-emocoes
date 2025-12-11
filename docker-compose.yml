@@ -35,7 +35,7 @@ services:
       args:
         # IMPORTANTE: Use o IP público da sua VPS e a porta do backend (8080)
         # O valor será injetado como VITE_API_URL no build.
-        VITE_API_URL: http://54.233.143.245:8080 
+        VITE_API_URL: http://56.125.218.140:8080 
     ports:
       # Mapeia a porta 80 do host (acesso padrão HTTP) para a porta 80 do Nginx
       - "80:80"
