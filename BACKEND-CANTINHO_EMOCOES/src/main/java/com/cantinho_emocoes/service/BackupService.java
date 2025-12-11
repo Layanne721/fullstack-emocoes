@@ -14,10 +14,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 public class BackupService {
@@ -34,11 +33,10 @@ public class BackupService {
     private String dbPassword;
 
     /**
-     * Gera um backup completo do banco de dados usando pg_dump em formato SQL (texto plano).
+     * Gera backup SQL.
      */
     public File gerarBackup() throws IOException, InterruptedException {
         DatabaseConfig config = parseDatabaseConfig(dbUrl);
-        
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         File backupFile = Files.createTempFile("backup_cantinho_" + timestamp + "_", ".sql").toFile();
 
@@ -56,41 +54,46 @@ public class BackupService {
         );
 
         Map<String, String> env = pb.environment();
-        env.put("PGPASSWORD", dbPassword);
+        if (dbPassword != null && !dbPassword.isEmpty()) {
+            env.put("PGPASSWORD", dbPassword);
+        }
 
-        logger.info("Iniciando backup (SQL) do banco: {} em {}", config.dbName, config.host);
-        
+        logger.info("Iniciando backup em: {}", backupFile.getAbsolutePath());
         executarProcesso(pb, "PG_DUMP");
 
-        logger.info("Backup gerado com sucesso: {}", backupFile.getAbsolutePath());
         return backupFile;
     }
 
     /**
-     * Restaura um backup, detectando se é .sql (texto) ou .dump (binário).
+     * Restaura backup (SQL ou Custom/Dump).
      */
     public void restaurarBackup(MultipartFile file) throws IOException, InterruptedException {
         DatabaseConfig config = parseDatabaseConfig(dbUrl);
         String originalName = file.getOriginalFilename();
-        
-        if (originalName == null) originalName = "backup.sql";
-        boolean isCustomFormat = originalName.endsWith(".dump") || originalName.endsWith(".backup");
+        if (originalName == null) originalName = "backup.dump";
 
-        // Mantém a extensão original para clareza no arquivo temporário
-        String ext = isCustomFormat ? ".dump" : ".sql";
-        Path tempFile = Files.createTempFile("restore_", ext);
+        // Detecção simples: se termina em .sql é texto, senão tentamos como binário (pg_restore)
+        boolean isSql = originalName.toLowerCase().endsWith(".sql");
         
+        Path tempFile = Files.createTempFile("restore_", isSql ? ".sql" : ".dump");
+
         try {
             file.transferTo(tempFile);
-            logger.info("Arquivo recebido: {} (Formato Custom/Binário: {})", originalName, isCustomFormat);
+            logger.info("Iniciando restauração. Arquivo: {} (Modo: {})", originalName, isSql ? "PSQL (Texto)" : "PG_RESTORE (Binário)");
 
             ProcessBuilder pb;
-            if (isCustomFormat) {
-                // Usa pg_restore para arquivos binários (.dump)
-                // --clean: limpa o banco antes
-                // --if-exists: evita erro se não existir
-                // -d: conecta no banco
-                logger.info("Usando pg_restore para arquivo binário...");
+            if (isSql) {
+                // Modo Texto (.sql)
+                pb = new ProcessBuilder(
+                    "psql",
+                    "-h", config.host,
+                    "-p", config.port,
+                    "-U", dbUser,
+                    "-d", config.dbName,
+                    "-f", tempFile.toAbsolutePath().toString()
+                );
+            } else {
+                // Modo Binário/Custom (.dump, .backup, etc)
                 pb = new ProcessBuilder(
                     "pg_restore",
                     "-h", config.host,
@@ -104,97 +107,114 @@ public class BackupService {
                     "--verbose",
                     tempFile.toAbsolutePath().toString()
                 );
-            } else {
-                // Usa psql para arquivos de texto (.sql)
-                logger.info("Usando psql para arquivo SQL plano...");
-                pb = new ProcessBuilder(
-                    "psql",
-                    "-h", config.host,
-                    "-p", config.port,
-                    "-U", dbUser,
-                    "-d", config.dbName,
-                    "-f", tempFile.toAbsolutePath().toString()
-                );
             }
 
             Map<String, String> env = pb.environment();
-            env.put("PGPASSWORD", dbPassword);
+            if (dbPassword != null && !dbPassword.isEmpty()) {
+                env.put("PGPASSWORD", dbPassword);
+            }
 
-            executarProcesso(pb, isCustomFormat ? "PG_RESTORE" : "PSQL");
-            
-            logger.info("Restauração concluída com sucesso.");
+            executarProcesso(pb, isSql ? "PSQL" : "PG_RESTORE");
+            logger.info("Restauração concluída.");
 
         } finally {
             try {
                 Files.deleteIfExists(tempFile);
             } catch (IOException e) {
-                logger.warn("Não foi possível deletar arquivo temporário: {}", e.getMessage());
+                logger.warn("Falha ao deletar arquivo temporário: {}", e.getMessage());
             }
         }
     }
 
     /**
-     * Executa o processo e trata logs e erros.
+     * Executa o processo e CAPTURA O ERRO para exibir no log/exception.
      */
-    private void executarProcesso(ProcessBuilder pb, String logPrefix) throws IOException, InterruptedException {
+    private void executarProcesso(ProcessBuilder pb, String nomeProcesso) throws IOException, InterruptedException {
+        // Redireciona erro para stdout para capturar tudo junto ou processa streams separadas
         Process process = pb.start();
-        
-        readStream(process.getErrorStream(), logPrefix + "_ERR");
-        readStream(process.getInputStream(), logPrefix + "_OUT");
 
-        boolean finished = process.waitFor(10, TimeUnit.MINUTES);
+        // Captura as saídas em Threads separadas para não bloquear
+        StreamGobbler errorGobbler = new StreamGobbler(process.getErrorStream());
+        StreamGobbler outputGobbler = new StreamGobbler(process.getInputStream());
+
+        errorGobbler.start();
+        outputGobbler.start();
+
+        boolean finished = process.waitFor(5, TimeUnit.MINUTES);
 
         if (!finished) {
             process.destroy();
-            throw new IOException("Tempo limite excedido (Timeout) no processo " + logPrefix);
+            throw new IOException("Timeout: O processo " + nomeProcesso + " demorou muito e foi cancelado.");
         }
 
-        // pg_restore pode retornar códigos de aviso (ex: 1) que não são erros fatais.
-        // Geralmente 0 = sucesso.
-        if (process.exitValue() != 0) {
-            // Se for pg_restore, as vezes warnings (código 1) são aceitáveis, mas erros críticos param tudo.
-            // Para segurança, vamos logar como erro, mas lançar exceção apenas se for psql ou código alto.
-            logger.warn("Processo {} terminou com código de saída: {}", logPrefix, process.exitValue());
+        int exitCode = process.exitValue();
+        
+        // pg_restore retorna 0 (sucesso) ou 1 (aviso/sucesso parcial) ou >1 (erros)
+        // Vamos ser tolerantes com warnings (1) no pg_restore
+        boolean sucesso = (exitCode == 0) || (nomeProcesso.equals("PG_RESTORE") && exitCode == 1);
+
+        if (!sucesso) {
+            String erros = errorGobbler.getOutput();
+            logger.error("Erro no {}: {}", nomeProcesso, erros);
             
-            if (!logPrefix.equals("PG_RESTORE") || process.exitValue() > 1) {
-                 throw new IOException("Falha no processo " + logPrefix + ". Código: " + process.exitValue());
-            }
+            // Lança exceção com a mensagem REAL do banco de dados
+            throw new IOException("Falha no " + nomeProcesso + " (Cód " + exitCode + "). Detalhes: " + erros);
         }
-    }
-
-    private void readStream(java.io.InputStream inputStream, String prefix) {
-        new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    // Logs detalhados apenas em debug para não poluir, ou info se necessário
-                    logger.debug("[{}]: {}", prefix, line);
-                }
-            } catch (IOException e) {
-                logger.error("Erro ao ler stream ({})", prefix, e);
-            }
-        }).start();
     }
 
     private DatabaseConfig parseDatabaseConfig(String url) {
         try {
-            String cleanUrl = url.replace("jdbc:postgresql://", "");
-            if (cleanUrl.contains("?")) {
-                cleanUrl = cleanUrl.substring(0, cleanUrl.indexOf("?"));
-            }
-            String[] parts = cleanUrl.split("/");
-            if (parts.length < 2) return new DatabaseConfig("db", "5432", "cantinho_db");
+            // Remove jdbc:postgresql://
+            String clean = url.replace("jdbc:postgresql://", "");
+            // Remove params (?...)
+            if (clean.contains("?")) clean = clean.substring(0, clean.indexOf("?"));
+            
+            String[] parts = clean.split("/");
+            if (parts.length < 2) return new DatabaseConfig("db", "5432", "cantinho_db"); // Fallback
 
             String hostPort = parts[0];
             String dbName = parts[1];
-            String host = hostPort.contains(":") ? hostPort.split(":")[0] : hostPort;
-            String port = hostPort.contains(":") ? hostPort.split(":")[1] : "5432";
-
+            
+            String host = hostPort;
+            String port = "5432";
+            
+            if (hostPort.contains(":")) {
+                String[] hp = hostPort.split(":");
+                host = hp[0];
+                port = hp[1];
+            }
             return new DatabaseConfig(host, port, dbName);
         } catch (Exception e) {
+            logger.error("Erro ao processar URL JDBC: {}", url);
             return new DatabaseConfig("db", "5432", "cantinho_db");
         }
     }
 
     private record DatabaseConfig(String host, String port, String dbName) {}
+
+    // Classe auxiliar para ler streams sem travar
+    private static class StreamGobbler extends Thread {
+        private final java.io.InputStream inputStream;
+        private final StringBuilder output = new StringBuilder();
+
+        public StreamGobbler(java.io.InputStream inputStream) {
+            this.inputStream = inputStream;
+        }
+
+        @Override
+        public void run() {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            } catch (IOException e) {
+                // Ignora erro de leitura de stream fechada
+            }
+        }
+
+        public String getOutput() {
+            return output.toString();
+        }
+    }
 }
