@@ -10,9 +10,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
-import java.io.IOException;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 @RestController
@@ -29,16 +26,17 @@ public class BackupController {
     public ResponseEntity<Resource> downloadBackup() {
         try {
             File backupFile = backupService.gerarBackup();
-            Resource resource = new FileSystemResource(backupFile);
+            FileSystemResource resource = new FileSystemResource(backupFile);
 
-            String filename = "backup_cantinho_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm")) + ".sql";
+            HttpHeaders headers = new HttpHeaders();
+            headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + backupFile.getName());
+            headers.add(HttpHeaders.CONTENT_TYPE, "application/sql");
 
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .headers(headers)
                     .contentLength(backupFile.length())
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
                     .body(resource);
-
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.internalServerError().build();
@@ -48,15 +46,20 @@ public class BackupController {
     @PostMapping("/restore")
     public ResponseEntity<?> restoreBackup(@RequestParam("file") MultipartFile file) {
         if (file.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Arquivo de backup não fornecido."));
+            return ResponseEntity.badRequest().body(Map.of("error", "Arquivo vazio."));
+        }
+        
+        String fileName = file.getOriginalFilename();
+        if (fileName == null || (!fileName.endsWith(".sql") && !fileName.endsWith(".dum") && !fileName.endsWith(".dump"))) {
+             return ResponseEntity.badRequest().body(Map.of("error", "Formato inválido. Use .sql ou .dum"));
         }
 
         try {
             backupService.restaurarBackup(file);
-            return ResponseEntity.ok(Map.of("message", "Banco de dados restaurado com sucesso!"));
+            return ResponseEntity.ok(Map.of("message", "Banco restaurado com sucesso!"));
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.internalServerError().body(Map.of("error", "Erro na restauração: " + e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("error", "Erro ao restaurar: " + e.getMessage()));
         }
     }
 }
