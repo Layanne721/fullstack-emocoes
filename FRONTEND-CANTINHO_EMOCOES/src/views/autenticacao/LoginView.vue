@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import api from '@/services/api'; // <--- IMPORTAÇÃO CENTRALIZADA
+import api from '@/services/api'; 
 import { useAuthStore } from '@/stores/auth';
 
 const router = useRouter();
@@ -25,7 +25,6 @@ async function checarStatusSistema() {
   erro.value = null;
   
   try {
-    // URL relativa, o api.js resolve o host
     await api.get('/api/health');
     bancoOnline.value = true;
   } catch (e) {
@@ -34,7 +33,7 @@ async function checarStatusSistema() {
         bancoOnline.value = false;
         erro.value = "⚠️ Sem conexão com o servidor.";
     } else {
-        // Se responder 403, 404 ou 500, o servidor está vivo
+        // 403, 404, 500 significa que o servidor está vivo
         bancoOnline.value = true;
     }
   } finally {
@@ -65,19 +64,23 @@ async function fazerLogin() {
       throw new Error('Erro na requisição');
     }
 
+    // --- CORREÇÃO DO LOGIN DE ADMIN ---
+    // Verifica se o backend mandou 'role' ou 'perfil'
+    const userRole = response.data.role || response.data.perfil;
+
     // Salva no Pinia/Store
     authStore.setLoginData(
       { 
         name: response.data.nome, 
         email: response.data.email || email.value, 
-        perfil: response.data.role, 
+        perfil: userRole, // Usa a variável corrigida
         avatarUrl: response.data.avatarUrl 
       },
       response.data.token
     );
     
     // Redirecionamento baseado no Perfil
-    if (response.data.role === 'ADMINISTRADOR') {
+    if (userRole === 'ADMINISTRADOR' || userRole === 'ADMIN') {
         router.push('/admin');
     } else {
         router.push('/selecionar-perfil');
