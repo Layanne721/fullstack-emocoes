@@ -1,6 +1,6 @@
 <script setup>
   import { ref, onMounted, computed } from 'vue';
-  import api from '@/services/api'; // <--- IMPORTAÇÃO
+  import api from '@/services/api';
   import { useRouter } from 'vue-router';
   import { useAuthStore } from '@/stores/auth';
   
@@ -31,7 +31,6 @@
     loading.value = true;
     erro.value = null;
     try {
-      // Interceptor injeta o token automaticamente
       const response = await api.get('/api/admin/usuarios');
       usuarios.value = response.data;
     } catch (e) {
@@ -69,7 +68,6 @@
   
     try {
       await api.delete(`/api/admin/usuarios/${usuario.id}`);
-      
       usuarios.value = usuarios.value.filter(u => u.id !== usuario.id);
       alert("Usuário e alunos excluídos com sucesso.");
     } catch (e) {
@@ -86,15 +84,13 @@
     baixandoBackup.value = true;
     try {
       const response = await api.get('/api/admin/backup/download', {
-        responseType: 'blob' // Importante para arquivos
+        responseType: 'blob'
       });
       
-      // Cria um link invisível para download
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
       
-      // Tenta extrair o nome do arquivo do header ou gera um padrão
       const contentDisposition = response.headers['content-disposition'];
       let fileName = `backup_cantinho_${new Date().toISOString().slice(0,10)}.sql`;
       if (contentDisposition) {
@@ -110,7 +106,7 @@
       alert("Download do backup iniciado!");
     } catch (e) {
       console.error(e);
-      alert("Erro ao gerar backup. Verifique se o servidor tem as ferramentas instaladas.");
+      alert("Erro ao gerar backup.");
     } finally {
       baixandoBackup.value = false;
     }
@@ -123,10 +119,9 @@
   function aoSelecionarArquivo(event) {
     const file = event.target.files[0];
     if (file) {
-      if (confirm(`⚠️ PERIGO: Você vai restaurar o banco de dados a partir de "${file.name}".\n\nIsso apagará TODOS os dados atuais e substituirá pelo backup.\n\nTem certeza absoluta?`)) {
+      if (confirm(`⚠️ PERIGO: Restaurar o banco a partir de "${file.name}" apagará TODOS os dados atuais.\n\nTem certeza absoluta?`)) {
         executarRestore(file);
       } else {
-        // Reseta o input para permitir selecionar o mesmo arquivo novamente se quiser
         inputArquivoRef.value.value = null;
       }
     }
@@ -143,11 +138,13 @@
           'Content-Type': 'multipart/form-data'
         }
       });
-      alert("✅ Banco de dados restaurado com sucesso! A página será recarregada.");
+      alert("✅ Banco de dados restaurado com sucesso! O sistema será recarregado.");
       window.location.reload();
     } catch (e) {
       console.error(e);
-      alert("Erro ao restaurar banco. Verifique o arquivo e tente novamente.");
+      // Mostra a mensagem exata do erro vinda do backend (ex: pg_restore not found)
+      const errorMsg = e.response?.data?.error || e.message || "Erro desconhecido";
+      alert(`❌ Falha na restauração:\n\n${errorMsg}`);
     } finally {
       restaurandoBackup.value = false;
       inputArquivoRef.value.value = null;
@@ -214,7 +211,7 @@
         <!-- CARD DE BACKUP E ESTATÍSTICAS -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          <!-- Estatísticas (Ocupa 2 colunas em telas grandes) -->
+          <!-- Estatísticas -->
           <div class="lg:col-span-2 grid grid-cols-2 gap-4">
               <div class="p-6 bg-white rounded-[25px] shadow-sm border border-indigo-100 flex flex-col justify-center">
               <p class="text-xs font-bold text-indigo-400 uppercase tracking-wider">TOTAL USUÁRIOS</p>
@@ -234,7 +231,7 @@
               </div>
           </div>
   
-          <!-- Painel de Backup (Nova Coluna) -->
+          <!-- Painel de Backup -->
           <div class="bg-gray-900 text-white p-6 rounded-[25px] shadow-lg flex flex-col justify-between relative overflow-hidden">
               <div class="absolute top-0 right-0 p-4 opacity-20 text-5xl">💾</div>
               <div>
@@ -249,7 +246,7 @@
                       class="w-full py-3 bg-indigo-500 hover:bg-indigo-600 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                       <span v-if="baixandoBackup" class="animate-spin">⏳</span>
-                      <span v-else>⬇️ Baixar Backup Completo</span>
+                      <span v-else>⬇️ Baixar Backup (.sql)</span>
                   </button>
   
                   <button 
@@ -258,13 +255,15 @@
                       class="w-full py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl font-bold text-sm text-red-400 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                       <span v-if="restaurandoBackup" class="animate-spin">⏳</span>
-                      <span v-else>⬆️ Restaurar Backup</span>
+                      <span v-else>⬆️ Restaurar (.sql/.dump)</span>
                   </button>
-                  <input type="file" ref="inputArquivoRef" class="hidden" accept=".sql" @change="aoSelecionarArquivo">
+                  <!-- AQUI: Aceita .sql, .dump e .backup -->
+                  <input type="file" ref="inputArquivoRef" class="hidden" accept=".sql,.dump,.backup" @change="aoSelecionarArquivo">
               </div>
           </div>
         </div>
   
+        <!-- Tabela de Usuários -->
         <div class="bg-white rounded-[30px] shadow-sm overflow-hidden min-h-[400px] border-2 border-white">
           <div class="p-6 border-b border-gray-100">
             <input v-model="termoPesquisa" type="text" placeholder="🔍 Buscar por professor ou email..." 
@@ -283,7 +282,6 @@
               </thead>
               <tbody class="divide-y divide-gray-50">
                 <template v-for="user in usuariosFiltrados" :key="user.id">
-                  
                   <tr class="hover:bg-[#F9FAFB] transition-colors">
                     <td class="p-6">
                       <div class="flex items-center gap-4">
@@ -312,24 +310,20 @@
                         :disabled="user.perfil === 'ADMINISTRADOR' || deletandoId === user.id"
                         :class="user.perfil === 'ADMINISTRADOR' ? 'opacity-30 cursor-not-allowed' : 'hover:bg-red-50 text-gray-400 hover:text-red-500'"
                         class="px-4 py-2 rounded-[15px] transition-colors border border-gray-100 text-xs font-bold flex items-center gap-2 ml-auto hover:border-red-100"
-                        :title="user.perfil === 'ADMINISTRADOR' ? 'Não é possível excluir Admins' : 'Excluir conta e alunos'"
                       >
                         <span v-if="deletandoId === user.id">⏳</span>
                         <span v-else>🗑️ Excluir</span>
                       </button>
                     </td>
                   </tr>
-  
                   <tr v-if="user.dependentes && user.dependentes.length > 0" class="bg-[#F8FAFC]">
                     <td colspan="4" class="p-0">
                       <div class="pl-20 pr-6 py-4 space-y-3">
                         <div class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                           <span>↘</span> Alunos de {{ user.nome }} ({{ user.dependentes.length }})
                         </div>
-                        
                         <div v-for="aluno in user.dependentes" :key="aluno.id" 
                              class="flex items-center justify-between bg-white p-3 rounded-[20px] border border-blue-100 shadow-sm hover:shadow-md transition-all">
-                          
                           <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-lg border-2 border-green-100">🎓</div>
                             <div>
@@ -337,20 +331,10 @@
                               <div class="text-[10px] text-gray-400 font-bold">Conta Aluno</div>
                             </div>
                           </div>
-  
-                          <div class="flex items-center gap-4">
-                             <span class="bg-green-50 text-green-600 px-3 py-1 rounded-full text-[10px] font-black uppercase border border-green-100">
-                               ALUNO
-                             </span>
-                             <span class="text-[10px] font-bold text-gray-400 mr-2">
-                               {{ formatarData(aluno.dataCadastro) }}
-                             </span>
-                          </div>
                         </div>
                       </div>
                     </td>
                   </tr>
-  
                 </template>
               </tbody>
             </table>
