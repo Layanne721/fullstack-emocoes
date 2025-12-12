@@ -73,6 +73,9 @@ const router = createRouter({
     { path: '/jogos/memoria', name: 'jogo-memoria', component: JogoMemoriaView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/jogos/nojinho', name: 'jogo-nojinho', component: JogoNojinhoView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/jogos/alegria', name: 'jogo-alegria', component: JogoAlegriaView, meta: { requiresAuth: true, requiresChild: true } },
+
+    {path: '/admin/dados',name: 'gerenciador-dados',component: () => import('../views/autenticacao/GerenciadorDados.vue'),meta: { requiresAuth: true }
+}
   ]
 })
 
