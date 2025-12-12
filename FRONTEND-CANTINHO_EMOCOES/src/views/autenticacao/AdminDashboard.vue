@@ -7,13 +7,13 @@ import api from '@/services/api';
 // Ícones (Lucide)
 import { 
   Users, BookOpen, BarChart2, LogOut, 
-  Trash2, Search, UploadCloud, DownloadCloud,Database
+  Trash2, Search, UploadCloud, DownloadCloud, Database
 } from 'lucide-vue-next';
 
 // --- CONFIGURAÇÃO ---
 const router = useRouter();
 const authStore = useAuthStore();
-const activeTab = ref('usuarios'); // Controle das abas
+const activeTab = ref('usuarios');
 const loading = ref(false);
 
 // --- DADOS ---
@@ -21,14 +21,13 @@ const usuarios = ref([]);
 const stats = ref({});
 const termoPesquisa = ref('');
 
-// --- VARIÁVEIS DE BACKUP (Do Snippet 1) ---
+// --- VARIÁVEIS DE BACKUP ---
 const fileInput = ref(null);
 const loadingBackup = ref(false);
 const loadingRestore = ref(false);
 const deletandoId = ref(null);
 
 onMounted(async () => {
-  // Verifica permissão (Adaptado para aceitar ADMIN ou ADMINISTRADOR)
   const perfil = authStore.user?.perfil;
   if (perfil !== 'ADMIN' && perfil !== 'ADMINISTRADOR') {
     router.push('/');
@@ -42,10 +41,10 @@ async function carregarDadosIniciais() {
   try {
     const [usersRes, statsRes] = await Promise.all([
       api.get('/api/admin/usuarios'),
-      api.get('/api/admin/dashboard/stats') // Ou use a lógica de cálculo local se preferir
+      api.get('/api/admin/dashboard/stats')
     ]);
     usuarios.value = usersRes.data;
-    stats.value = statsRes.data; // Espera objeto: { totalUsuarios, totalDiarios, totalAtividades }
+    stats.value = statsRes.data; 
   } catch (error) {
     console.error('Erro ao carregar dados:', error);
   } finally {
@@ -53,25 +52,23 @@ async function carregarDadosIniciais() {
   }
 }
 
-// --- LÓGICA DE BACKUP & RESTORE (Do Snippet 1) ---
+// --- BACKUP & RESTORE ---
 async function baixarBackup() {
     loadingBackup.value = true;
     try {
         const response = await api.get('/api/admin/backup/download', { responseType: 'blob' });
-        
         const url = window.URL.createObjectURL(new Blob([response.data]));
         const link = document.createElement('a');
         link.href = url;
         const date = new Date().toISOString().slice(0, 10);
         link.setAttribute('download', `backup_cantinho_${date}.sql`);
-        
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
     } catch (e) {
         console.error(e);
-        alert("Erro ao baixar backup. Verifique se o servidor possui as ferramentas instaladas.");
+        alert("Erro ao baixar backup.");
     } finally {
         loadingBackup.value = false;
     }
@@ -85,14 +82,7 @@ async function enviarRestore(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    const confirmacao = confirm(
-        `⚠️ PERIGO CRÍTICO ⚠️\n\n` +
-        `Você está prestes a restaurar o banco de dados usando o arquivo:\n"${file.name}"\n\n` +
-        `Isso APAGARÁ TODOS os dados atuais e os substituirá pelos do backup.\n` +
-        `Deseja realmente continuar?`
-    );
-    
-    if (!confirmacao) {
+    if (!confirm(`⚠️ PERIGO: Isso substituirá TODOS os dados atuais pelo backup "${file.name}". Continuar?`)) {
         event.target.value = '';
         return;
     }
@@ -105,7 +95,7 @@ async function enviarRestore(event) {
         await api.post('/api/admin/backup/restore', formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
-        alert("✅ Sucesso! O banco de dados foi restaurado. A página será recarregada.");
+        alert("✅ Banco restaurado com sucesso! A página será recarregada.");
         window.location.reload();
     } catch (e) {
         const msg = e.response?.data?.error || "Falha na restauração.";
@@ -116,12 +106,10 @@ async function enviarRestore(event) {
     }
 }
 
-// --- FILTROS E AÇÕES DE USUÁRIO ---
-
+// --- FILTROS E AÇÕES ---
 const usuariosFiltrados = computed(() => {
   if (!termoPesquisa.value) return usuarios.value;
   const termo = termoPesquisa.value.toLowerCase();
-  
   return usuarios.value.filter(u => 
     u.nome.toLowerCase().includes(termo) || 
     (u.email && u.email.toLowerCase().includes(termo))
@@ -133,19 +121,17 @@ async function excluirUsuario(usuario) {
     alert("⛔ Você não pode excluir administradores.");
     return;
   }
-
-  let mensagem = `⚠️ Tem certeza que deseja excluir ${usuario.nome}?`;
+  let mensagem = `⚠️ Excluir ${usuario.nome}?`;
   if (usuario.dependentes?.length > 0) {
     mensagem += `\n\nATENÇÃO: Isso excluirá também ${usuario.dependentes.length} alunos vinculados!`;
   }
-
   if (!confirm(mensagem)) return;
 
   deletandoId.value = usuario.id;
   try {
     await api.delete(`/api/admin/usuarios/${usuario.id}`);
     usuarios.value = usuarios.value.filter(u => u.id !== usuario.id);
-    alert('Usuário excluído com sucesso!');
+    alert('Usuário excluído!');
   } catch (error) {
     alert('Erro ao excluir usuário.');
   } finally {
@@ -155,7 +141,6 @@ async function excluirUsuario(usuario) {
 
 function formatarData(data) {
   if (!data) return '-';
-  // Verifica se vem como array [ano, mes, dia] ou string ISO
   if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2]).toLocaleDateString('pt-BR');
   return new Date(data).toLocaleDateString('pt-BR');
 }
@@ -169,7 +154,6 @@ function logout() {
 
 <template>
   <div class="min-h-screen bg-[#F0F7FF] flex font-nunito relative overflow-hidden">
-    
     <div class="absolute top-10 left-60 text-4xl animate-float-slow opacity-30 pointer-events-none z-0">📚</div>
     <div class="absolute bottom-10 right-10 text-5xl animate-bounce-slow opacity-30 pointer-events-none z-0">🎓</div>
 
@@ -180,28 +164,20 @@ function logout() {
       </div>
       
       <nav class="flex-1 px-4 space-y-3 mt-4">
-        <button 
-          @click="activeTab = 'usuarios'"
-          :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', 
-            activeTab === 'usuarios' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']"
-        >
+        <button @click="activeTab = 'usuarios'" :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', activeTab === 'usuarios' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']">
           <Users size="22" /> <span class="hidden md:block">Usuários</span>
         </button>
 
-        <button 
-          @click="activeTab = 'atividades'"
-          :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', 
-            activeTab === 'atividades' ? 'bg-orange-50 text-orange-500 shadow-sm' : 'text-gray-400 hover:bg-gray-50']"
-        >
+        <button @click="activeTab = 'atividades'" :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', activeTab === 'atividades' ? 'bg-orange-50 text-orange-500 shadow-sm' : 'text-gray-400 hover:bg-gray-50']">
           <BookOpen size="22" /> <span class="hidden md:block">Atividades</span>
         </button>
 
-        <button 
-          @click="activeTab = 'stats'"
-          :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', 
-            activeTab === 'stats' ? 'bg-green-50 text-green-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']"
-        >
+        <button @click="activeTab = 'stats'" :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', activeTab === 'stats' ? 'bg-green-50 text-green-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']">
           <BarChart2 size="22" /> <span class="hidden md:block">Estatísticas</span>
+        </button>
+
+        <button @click="router.push('/admin/dados')" class="w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold text-gray-400 hover:bg-gray-50 hover:text-indigo-600">
+          <Database size="22" /> <span class="hidden md:block">Gerenciar Dados</span>
         </button>
       </nav>
 
@@ -222,22 +198,12 @@ function logout() {
         
         <div class="flex items-center gap-3">
            <input type="file" ref="fileInput" class="hidden" accept=".sql,.dum,.dump" @change="enviarRestore">
-
-           <button 
-              @click="baixarBackup"
-              :disabled="loadingBackup"
-              class="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-[15px] font-bold hover:bg-indigo-100 flex items-center gap-2 transition-all border border-indigo-100 text-sm"
-           >
+           <button @click="baixarBackup" :disabled="loadingBackup" class="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-[15px] font-bold hover:bg-indigo-100 flex items-center gap-2 transition-all border border-indigo-100 text-sm">
               <DownloadCloud size="18" v-if="!loadingBackup"/>
               <span v-if="loadingBackup" class="animate-spin">⏳</span>
               <span v-else>Backup</span>
            </button>
-
-           <button 
-              @click="acionarInputRestore"
-              :disabled="loadingRestore"
-              class="px-4 py-2 bg-orange-50 text-orange-600 rounded-[15px] font-bold hover:bg-orange-100 flex items-center gap-2 transition-all border border-orange-100 text-sm"
-           >
+           <button @click="acionarInputRestore" :disabled="loadingRestore" class="px-4 py-2 bg-orange-50 text-orange-600 rounded-[15px] font-bold hover:bg-orange-100 flex items-center gap-2 transition-all border border-orange-100 text-sm">
               <UploadCloud size="18" v-if="!loadingRestore"/>
               <span v-if="loadingRestore" class="animate-spin">🔄</span>
               <span v-else>Restaurar</span>
@@ -247,19 +213,11 @@ function logout() {
 
       <div v-if="activeTab === 'usuarios'" class="space-y-6 animate-fade-in">
         <div class="bg-white rounded-[30px] shadow-sm border-2 border-white overflow-hidden min-h-[500px]">
-          
           <div class="p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
-            <h3 class="font-black text-lg text-indigo-900 flex items-center gap-2">
-              👥 Lista de Usuários
-            </h3>
+            <h3 class="font-black text-lg text-indigo-900 flex items-center gap-2">👥 Lista de Usuários</h3>
             <div class="relative w-full md:w-1/3">
               <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="20" />
-              <input 
-                v-model="termoPesquisa"
-                type="text" 
-                placeholder="Buscar por nome ou email..." 
-                class="w-full pl-12 pr-4 py-3 bg-white rounded-[20px] border-2 border-transparent focus:border-indigo-200 outline-none font-bold text-gray-600 shadow-sm transition-all placeholder-gray-300"
-              >
+              <input v-model="termoPesquisa" type="text" placeholder="Buscar..." class="w-full pl-12 pr-4 py-3 bg-white rounded-[20px] border-2 border-transparent focus:border-indigo-200 outline-none font-bold text-gray-600 shadow-sm transition-all placeholder-gray-300">
             </div>
           </div>
 
@@ -289,36 +247,23 @@ function logout() {
                       </div>
                     </td>
                     <td class="p-6">
-                      <span :class="{
-                        'bg-purple-50 text-purple-600 border-purple-100': user.perfil === 'ADMIN' || user.perfil === 'ADMINISTRADOR',
-                        'bg-blue-50 text-blue-600 border-blue-100': user.perfil === 'RESPONSAVEL',
-                        'bg-green-50 text-green-600 border-green-100': user.perfil === 'DEPENDENTE'
-                      }" class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wide border">
+                      <span :class="{'bg-purple-50 text-purple-600 border-purple-100': user.perfil === 'ADMIN' || user.perfil === 'ADMINISTRADOR', 'bg-blue-50 text-blue-600 border-blue-100': user.perfil === 'RESPONSAVEL', 'bg-green-50 text-green-600 border-green-100': user.perfil === 'DEPENDENTE'}" class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wide border">
                         {{ user.perfil === 'RESPONSAVEL' ? 'PROFESSOR' : user.perfil }}
                       </span>
                     </td>
                     <td class="p-6 text-sm font-bold text-gray-400">{{ formatarData(user.dataCadastro) }}</td>
                     <td class="p-6 text-right">
-                      <button 
-                        @click="excluirUsuario(user)"
-                        :disabled="deletandoId === user.id"
-                        class="p-2 bg-white text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-gray-100 hover:border-red-100 shadow-sm"
-                        title="Excluir"
-                      >
+                      <button @click="excluirUsuario(user)" :disabled="deletandoId === user.id" class="p-2 bg-white text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-gray-100 hover:border-red-100 shadow-sm">
                         <span v-if="deletandoId === user.id" class="animate-spin text-xs">⏳</span>
                         <Trash2 size="18" v-else />
                       </button>
                     </td>
                   </tr>
-
                   <tr v-if="user.dependentes && user.dependentes.length > 0" class="bg-[#F8FAFC]">
                     <td colspan="4" class="p-0">
                       <div class="pl-20 pr-6 py-4 space-y-3">
-                         <div class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                           <span>↘</span> Alunos de {{ user.nome }}
-                         </div>
-                         <div v-for="aluno in user.dependentes" :key="aluno.id" 
-                              class="flex items-center justify-between bg-white p-3 rounded-[20px] border border-blue-50 shadow-sm hover:shadow-md transition-all">
+                         <div class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2"><span>↘</span> Alunos de {{ user.nome }}</div>
+                         <div v-for="aluno in user.dependentes" :key="aluno.id" class="flex items-center justify-between bg-white p-3 rounded-[20px] border border-blue-50 shadow-sm hover:shadow-md transition-all">
                             <div class="flex items-center gap-3">
                               <div class="w-8 h-8 rounded-full bg-green-50 text-sm flex items-center justify-center border border-green-100">🎓</div>
                               <span class="font-bold text-gray-600 text-sm">{{ aluno.nome }}</span>
@@ -342,13 +287,11 @@ function logout() {
              <p class="text-xs font-black text-indigo-400 uppercase tracking-wider relative z-10">Total de Usuários</p>
              <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalUsuarios || 0 }}</p>
           </div>
-
           <div class="bg-white p-8 rounded-[30px] shadow-sm border border-green-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
              <div class="absolute -right-4 -top-4 w-24 h-24 bg-green-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
              <p class="text-xs font-black text-green-500 uppercase tracking-wider relative z-10">Diários de Emoções</p>
              <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalDiarios || 0 }}</p>
           </div>
-
           <div class="bg-white p-8 rounded-[30px] shadow-sm border border-orange-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
              <div class="absolute -right-4 -top-4 w-24 h-24 bg-orange-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
              <p class="text-xs font-black text-orange-400 uppercase tracking-wider relative z-10">Atividades Criadas</p>
@@ -371,28 +314,11 @@ function logout() {
 
 <style scoped>
 .font-nunito { font-family: 'Nunito', sans-serif; }
-
-/* Animações suaves */
-@keyframes floatSlow { 
-    0%, 100% { transform: translateY(0px); } 
-    50% { transform: translateY(-15px); } 
-}
+@keyframes floatSlow { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-15px); } }
 .animate-float-slow { animation: floatSlow 4s ease-in-out infinite; }
 .animate-bounce-slow { animation: floatSlow 3s ease-in-out infinite; animation-delay: 1.5s; }
-
 .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-<button 
-          @click="router.push('/admin/dados')"
-          class="w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold text-gray-400 hover:bg-gray-50 hover:text-indigo-600"
-        >
-          <Database size="22" /> <span class="hidden md:block">Gerenciar Dados</span>
-        </button>
-/* Scrollbar personalizada */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #E0E7FF; border-radius: 10px; }
