@@ -23,7 +23,7 @@ public class AdminController {
     private final DiarioRepository diarioRepository;
     private final AtividadeRepository atividadeRepository;
 
-    // O BackupService foi removido daqui pois agora existe o BackupController
+    // Construtor atualizado: Removemos o BackupService daqui
     public AdminController(UsuarioService usuarioService, 
                            UsuarioRepository usuarioRepository,
                            DiarioRepository diarioRepository,
