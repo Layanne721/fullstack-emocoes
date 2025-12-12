@@ -10,6 +10,7 @@ const SelecionarPerfilView = () => import('../views/autenticacao/SelecaoPerfilVi
 
 // Admin
 const AdminDashboard = () => import('../views/autenticacao/AdminDashboard.vue')
+const GerenciadorDados = () => import('../views/autenticacao/GerenciadorDados.vue')
 
 // Funcionalidades (Crianças)
 const HomeView = () => import('../views/inicio/HomeView.vue')
@@ -48,6 +49,12 @@ const router = createRouter({
       component: AdminDashboard,
       meta: { requiresAuth: true, requiresAdmin: true }
     },
+    {
+      path: '/admin/dados',
+      name: 'gerenciador-dados',
+      component: GerenciadorDados,
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
 
     // Rotas de Usuário Comum
     {
@@ -73,9 +80,6 @@ const router = createRouter({
     { path: '/jogos/memoria', name: 'jogo-memoria', component: JogoMemoriaView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/jogos/nojinho', name: 'jogo-nojinho', component: JogoNojinhoView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/jogos/alegria', name: 'jogo-alegria', component: JogoAlegriaView, meta: { requiresAuth: true, requiresChild: true } },
-
-    {path: '/admin/dados',name: 'gerenciador-dados',component: () => import('../views/autenticacao/GerenciadorDados.vue'),meta: { requiresAuth: true }
-}
   ]
 })
 
@@ -89,6 +93,7 @@ router.beforeEach((to, from, next) => {
 
   const publicPages = ['/login', '/registro', '/recuperar-senha', '/resetar-senha'];
   const authRequired = !publicPages.includes(to.path);
+  const isAdmin = userRole === 'ADMINISTRADOR' || userRole === 'ADMIN';
 
   // 1. Não autenticado tentando acessar área restrita
   if (authRequired && !isAuthenticated) {
@@ -97,25 +102,25 @@ router.beforeEach((to, from, next) => {
 
   // 2. Se já está logado e tenta ir para Login
   if (isAuthenticated && publicPages.includes(to.path)) {
-    if (userRole === 'ADMINISTRADOR') return next('/admin');
+    if (isAdmin) return next('/admin');
     return next('/selecionar-perfil');
   }
 
   // 3. REGRA CRÍTICA: Impedir ADMIN de entrar em rotas de Pais/Crianças
-  if (userRole === 'ADMINISTRADOR') {
-    // Se o Admin tentar ir para qualquer lugar que NÃO seja /admin, forçamos ele de volta
-    if (to.path !== '/admin') {
+  // Correção: Permitir sub-rotas como /admin/dados
+  if (isAdmin) {
+    if (!to.path.startsWith('/admin')) {
       return next('/admin');
     }
   }
 
   // 4. Bloquear não-admins de acessar /admin
-  if (to.meta.requiresAdmin && userRole !== 'ADMINISTRADOR') {
+  if (to.meta.requiresAdmin && !isAdmin) {
     return next('/selecionar-perfil');
   }
 
   // 5. Fluxo normal de Pais/Crianças
-  if (to.meta.requiresChild && isAuthenticated && !isChildSelected && userRole !== 'ADMINISTRADOR') {
+  if (to.meta.requiresChild && isAuthenticated && !isChildSelected && !isAdmin) {
     return next('/selecionar-perfil');
   }
 

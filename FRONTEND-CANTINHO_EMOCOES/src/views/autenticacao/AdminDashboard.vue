@@ -7,7 +7,7 @@ import api from '@/services/api';
 // Ícones (Lucide)
 import { 
   Users, BookOpen, BarChart2, LogOut, 
-  Trash2, Search, UploadCloud, DownloadCloud 
+  Trash2, Search, UploadCloud, DownloadCloud,Database
 } from 'lucide-vue-next';
 
 // --- CONFIGURAÇÃO ---
@@ -386,6 +386,12 @@ function logout() {
     to { opacity: 1; transform: translateY(0); }
 }
 
+<button 
+          @click="router.push('/admin/dados')"
+          class="w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold text-gray-400 hover:bg-gray-50 hover:text-indigo-600"
+        >
+          <Database size="22" /> <span class="hidden md:block">Gerenciar Dados</span>
+        </button>
 /* Scrollbar personalizada */
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
