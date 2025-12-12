@@ -11,8 +11,6 @@ const email = ref('');
 const senha = ref('');
 const erro = ref(null);
 const isSubmitting = ref(false);
-
-// --- ESTADOS DE CONEXÃO ---
 const verificandoConexao = ref(true);
 const bancoOnline = ref(false);
 
@@ -23,17 +21,15 @@ onMounted(async () => {
 async function checarStatusSistema() {
   verificandoConexao.value = true;
   erro.value = null;
-  
   try {
     await api.get('/api/health');
     bancoOnline.value = true;
   } catch (e) {
+    // Se der erro de rede, avisa. Se der 403/500, o server ta online.
     if (e.code === 'ERR_NETWORK') {
-        console.error("Servidor offline:", e);
         bancoOnline.value = false;
         erro.value = "⚠️ Sem conexão com o servidor.";
     } else {
-        // 403, 404, 500 significa que o servidor está vivo
         bancoOnline.value = true;
     }
   } finally {
@@ -51,35 +47,25 @@ async function fazerLogin() {
     const response = await api.post('/auth/login', {
       email: email.value,
       senha: senha.value
-    }, {
-      validateStatus: (status) => status < 500
     });
     
-    if (response.status === 401 || response.status === 403) {
-      erro.value = 'E-mail ou senha incorretos.';
-      return;
-    }
+    const userData = response.data;
 
-    if (response.status !== 200) {
-      throw new Error('Erro na requisição');
-    }
+    // --- CORREÇÃO CRÍTICA DO LOGIN ---
+    // Verifica 'role' ou 'perfil' para garantir que pegamos o dado certo
+    const userRole = userData.role || userData.perfil;
 
-    // --- CORREÇÃO DO LOGIN DE ADMIN ---
-    // Verifica se o backend mandou 'role' ou 'perfil'
-    const userRole = response.data.role || response.data.perfil;
-
-    // Salva no Pinia/Store
     authStore.setLoginData(
       { 
-        name: response.data.nome, 
-        email: response.data.email || email.value, 
-        perfil: userRole, // Usa a variável corrigida
-        avatarUrl: response.data.avatarUrl 
+        name: userData.nome, 
+        email: userData.email, 
+        perfil: userRole, 
+        avatarUrl: userData.avatarUrl 
       },
-      response.data.token
+      userData.token
     );
     
-    // Redirecionamento baseado no Perfil
+    // Redirecionamento
     if (userRole === 'ADMINISTRADOR' || userRole === 'ADMIN') {
         router.push('/admin');
     } else {
@@ -88,7 +74,9 @@ async function fazerLogin() {
 
   } catch (e) {
     console.error(e);
-    if (e.code === 'ERR_NETWORK') {
+    if (e.response && (e.response.status === 401 || e.response.status === 403)) {
+      erro.value = 'E-mail ou senha incorretos.';
+    } else if (e.code === 'ERR_NETWORK') {
       bancoOnline.value = false;
       erro.value = "Perda de conexão com o servidor.";
     } else {

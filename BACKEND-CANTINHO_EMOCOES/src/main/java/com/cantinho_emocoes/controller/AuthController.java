@@ -37,6 +37,7 @@ public class AuthController {
         this.usuarioService = usuarioService;
     }
 
+    // --- REGISTRO DE RESPONSÁVEL ---
     @PostMapping("/register")
     public ResponseEntity<?> registerResponsavel(@RequestBody RegisterRequestDTO request) {
         if (usuarioRepository.findByEmail(request.email()).isPresent()) {
@@ -59,6 +60,7 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("message", "Conta criada com sucesso!"));
     }
 
+    // --- LOGIN ---
     @PostMapping("/login")
     public ResponseEntity<?> loginUser(@RequestBody LoginRequestDTO request) {
         try {
@@ -67,12 +69,21 @@ public class AuthController {
             );
             Usuario usuario = (Usuario) authentication.getPrincipal();
             String token = jwtService.generateToken(usuario);
-            return ResponseEntity.ok(new LoginResponseDTO(token, usuario.getNome(), usuario.getEmail(), usuario.getPerfil(), usuario.getAvatarUrl()));
+            
+            // Retorna o DTO com o campo 'role' preenchido corretamente pelo Perfil
+            return ResponseEntity.ok(new LoginResponseDTO(
+                token, 
+                usuario.getNome(), 
+                usuario.getEmail(), 
+                usuario.getPerfil(), // O Frontend vai receber isso como 'role'
+                usuario.getAvatarUrl()
+            ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Email ou senha inválidos."));
         }
     }
 
+    // --- VALIDAÇÃO DE PIN ---
     @PostMapping("/validar-pin")
     public ResponseEntity<?> validarPin(@RequestBody Map<String, String> request, @AuthenticationPrincipal UserDetails userDetails) {
         if (userDetails == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -87,7 +98,7 @@ public class AuthController {
         }
     }
 
-    // --- NOVA ROTA UNIFICADA PARA CORRIGIR O ERRO 500 ---
+    // --- ATUALIZAÇÃO UNIFICADA DE PERFIL ---
     // DTO local para capturar tanto 'name' quanto 'nome' e 'avatarUrl'
     public record PerfilCompletoDTO(String name, String nome, String avatarUrl) {}
 
@@ -125,8 +136,8 @@ public class AuthController {
                     .body(Map.of("message", "Erro ao processar atualização: " + e.getMessage()));
         }
     }
-    // ----------------------------------------------------
 
+    // --- ATUALIZAÇÃO ESPECÍFICA DE DADOS (LEGADO/BACKUP) ---
     @PutMapping("/meu-perfil/dados")
     public ResponseEntity<?> updateMeusDados(@AuthenticationPrincipal UserDetails userDetails, @RequestBody UsuarioUpdateDTO updateDTO) {
         if (userDetails == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -138,6 +149,7 @@ public class AuthController {
         }
     }
 
+    // --- EXCLUSÃO DE CONTA ---
     @DeleteMapping("/meu-perfil")
     public ResponseEntity<?> deleteAccount(@AuthenticationPrincipal UserDetails userDetails) {
         try {
@@ -149,6 +161,7 @@ public class AuthController {
         }
     }
 
+    // --- RECUPERAÇÃO DE SENHA (ESQUECI A SENHA) ---
     @PostMapping("/recuperar-senha")
     public ResponseEntity<?> forgotPassword(@RequestBody ForgotPasswordRequest request) {
         try {
@@ -160,6 +173,7 @@ public class AuthController {
         }
     }
 
+    // --- REDEFINIÇÃO DE SENHA (NOVA SENHA) ---
     @PostMapping("/resetar-senha")
     public ResponseEntity<?> resetPassword(@RequestBody ResetPasswordRequest request) {
         try {
@@ -170,6 +184,7 @@ public class AuthController {
         }
     }
     
+    // --- ATUALIZAÇÃO DE AVATAR (ESPECÍFICA) ---
     @PutMapping("/meu-perfil/avatar")
     public ResponseEntity<?> updateAvatar(@AuthenticationPrincipal UserDetails userDetails, @RequestBody AvatarSelectionDTO avatarDTO) {
         if (userDetails == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();

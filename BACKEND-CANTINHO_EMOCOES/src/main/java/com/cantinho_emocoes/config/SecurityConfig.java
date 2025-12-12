@@ -32,13 +32,23 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(AbstractHttpConfigurer::disable)
-            .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Usa a configuração abaixo
+            // IMPORTANTE: Usa a configuração de CORS definida abaixo
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authorize -> authorize
+                // Rotas Públicas (Login, Cadastro, Health Check, Imagens)
                 .requestMatchers("/auth/**", "/api/health", "/uploads/**").permitAll()
-                .requestMatchers("/api/admin/**").hasRole("ADMINISTRADOR")
+                
+                // Rotas de Admin (Aceita tanto 'ADMIN' quanto 'ADMINISTRADOR' para evitar erros)
+                .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "ADMINISTRADOR")
+                
+                // Rotas de Responsável
                 .requestMatchers("/api/responsavel/**").hasRole("RESPONSAVEL")
+                
+                // Rotas de Diário (Crianças/Pais)
                 .requestMatchers("/api/diario/**").authenticated() 
+                
+                // Qualquer outra requisição precisa estar logada
                 .anyRequest().authenticated()
             )
             .authenticationProvider(authenticationProvider)
@@ -51,10 +61,9 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         
-        // --- CORREÇÃO DEFINITIVA PARA CORS ---
-        // Usa patterns com "*" para aceitar QUALQUER domínio (localhost, render, .shop, etc)
+        // --- CORREÇÃO DE CORS (O "SITE BUGADO") ---
+        // Permite qualquer origem, cabeçalho e método.
         configuration.setAllowedOriginPatterns(List.of("*"));
-        
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);

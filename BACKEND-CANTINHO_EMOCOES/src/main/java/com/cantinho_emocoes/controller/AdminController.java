@@ -58,75 +58,64 @@ public class AdminController {
         return ResponseEntity.ok(lista);
     }
 
+    // DTO Interno para evitar problemas com @JsonIgnore na senha
+    public record UsuarioAdminRequest(Long id, String nome, String email, String senha, Perfil perfil) {}
+
     @PostMapping("/usuarios")
-    public ResponseEntity<?> salvarUsuario(@RequestBody Usuario usuario) {
-        if (usuario.getId() != null && usuarioRepository.existsById(usuario.getId())) {
-            Usuario existente = usuarioRepository.findById(usuario.getId()).get();
-            existente.setNome(usuario.getNome());
-            existente.setEmail(usuario.getEmail());
-            existente.setPerfil(usuario.getPerfil());
-            if (usuario.getPassword() != null && !usuario.getPassword().isEmpty()) {
-                existente.setSenha(passwordEncoder.encode(usuario.getPassword()));
-            }
-            return ResponseEntity.ok(usuarioRepository.save(existente));
-        } else {
-            if (usuarioRepository.findByEmail(usuario.getEmail()).isPresent()) {
+    public ResponseEntity<?> salvarUsuario(@RequestBody UsuarioAdminRequest request) {
+        Usuario usuario;
+
+        // Edição
+        if (request.id() != null && usuarioRepository.existsById(request.id())) {
+            usuario = usuarioRepository.findById(request.id()).get();
+            usuario.setNome(request.nome());
+            usuario.setEmail(request.email());
+            usuario.setPerfil(request.perfil());
+        } 
+        // Novo Usuário
+        else {
+            if (usuarioRepository.findByEmail(request.email()).isPresent()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Email já existe"));
             }
-            if (usuario.getPassword() != null) {
-                usuario.setSenha(passwordEncoder.encode(usuario.getPassword()));
-            }
+            usuario = new Usuario();
+            usuario.setNome(request.nome());
+            usuario.setEmail(request.email());
+            usuario.setPerfil(request.perfil());
             usuario.setDataCadastro(LocalDate.now());
-            return ResponseEntity.ok(usuarioRepository.save(usuario));
+            // Avatar padrão se não tiver
+            usuario.setAvatarUrl("https://ui-avatars.com/api/?name=" + request.nome().replace(" ", "+"));
         }
+
+        // Atualiza a senha SE ela foi enviada no formulário
+        if (request.senha() != null && !request.senha().isBlank()) {
+            usuario.setSenha(passwordEncoder.encode(request.senha()));
+        }
+
+        usuarioRepository.save(usuario);
+        return ResponseEntity.ok(Map.of("message", "Usuário salvo com sucesso!"));
     }
 
     // --- ALUNOS (DEPENDENTES) ---
     @GetMapping("/alunos")
     public ResponseEntity<List<Usuario>> listarAlunos() {
-        // Retorna apenas quem TEM responsável (Alunos)
         List<Usuario> lista = usuarioRepository.findAll().stream()
                 .filter(u -> u.getResponsavel() != null)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(lista);
     }
 
-    @PostMapping("/alunos")
-    public ResponseEntity<?> salvarAluno(@RequestBody Usuario aluno) {
-        if (aluno.getResponsavel() == null || aluno.getResponsavel().getId() == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Responsável obrigatório"));
-        }
-        Usuario responsavel = usuarioRepository.findById(aluno.getResponsavel().getId())
-                .orElseThrow(() -> new RuntimeException("Responsável não encontrado"));
-
-        if (aluno.getId() != null && usuarioRepository.existsById(aluno.getId())) {
-            Usuario existente = usuarioRepository.findById(aluno.getId()).get();
-            existente.setNome(aluno.getNome());
-            existente.setDataNascimento(aluno.getDataNascimento());
-            existente.setResponsavel(responsavel);
-            existente.setAvatarUrl(aluno.getAvatarUrl());
-            return ResponseEntity.ok(usuarioRepository.save(existente));
-        } else {
-            aluno.setResponsavel(responsavel);
-            aluno.setPerfil(Perfil.CRIANCA);
-            aluno.setDataCadastro(LocalDate.now());
-            aluno.setSenha(passwordEncoder.encode("123456")); 
-            return ResponseEntity.ok(usuarioRepository.save(aluno));
-        }
-    }
-
-    // --- DELETAR QUALQUER UM ---
+    // --- DELETAR ---
     @DeleteMapping("/usuarios/{id}")
     public ResponseEntity<?> excluirUsuario(@PathVariable Long id) {
         try {
             usuarioService.deletarUsuarioPeloAdmin(id);
             return ResponseEntity.ok(Map.of("message", "Excluído com sucesso!"));
         } catch (Exception e) {
-            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(400).body(Map.of("error", e.getMessage()));
         }
     }
 
-    // --- ATIVIDADES E DIÁRIOS ---
+    // --- ATIVIDADES ---
     @GetMapping("/atividades")
     public ResponseEntity<List<Atividade>> listarAtividades() {
         return ResponseEntity.ok(atividadeRepository.findAll());
@@ -145,21 +134,5 @@ public class AdminController {
     public ResponseEntity<?> excluirAtividade(@PathVariable Long id) {
         atividadeRepository.deleteById(id);
         return ResponseEntity.ok(Map.of("message", "Atividade excluída"));
-    }
-
-    @GetMapping("/diarios")
-    public ResponseEntity<List<Diario>> listarDiarios() {
-        return ResponseEntity.ok(diarioRepository.findAll());
-    }
-    
-    @PostMapping("/diarios")
-    public ResponseEntity<?> salvarDiario(@RequestBody Diario diario) {
-        return ResponseEntity.ok(diarioRepository.save(diario));
-    }
-
-    @DeleteMapping("/diarios/{id}")
-    public ResponseEntity<?> excluirDiario(@PathVariable Long id) {
-        diarioRepository.deleteById(id);
-        return ResponseEntity.ok(Map.of("message", "Diário excluído"));
     }
 }

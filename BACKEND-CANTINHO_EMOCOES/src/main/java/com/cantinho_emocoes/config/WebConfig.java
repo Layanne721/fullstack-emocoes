@@ -7,14 +7,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
-    // --- CORREÇÃO: REMOVIDO O CONFLITO DE CORS ---
-    // O método addCorsMappings foi removido daqui porque ele conflitava 
-    // com o SecurityConfig.java, bloqueando o site.
-    // Agora o SecurityConfig gerencia tudo sozinho.
-
+    // Apenas configura a pasta de uploads.
+    // O CORS foi removido daqui para não conflitar com o SecurityConfig.
+    
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Configuração para servir imagens salvas na pasta uploads
         registry.addResourceHandler("/uploads/**")
                 .addResourceLocations("file:./uploads/");
     }
