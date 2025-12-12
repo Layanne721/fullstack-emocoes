@@ -9,17 +9,18 @@ services:
       context: ./BACKEND-CANTINHO_EMOCOES
       dockerfile: Dockerfile
     ports:
-      # Mapeia a porta 8080 do host para a porta 8080 do container
-      - "8080:8080"
+      # Mapeia para localhost apenas, pois o Nginx fará o proxy
+      - "127.0.0.1:8080:8080"
     environment:
-      # Sobrescreve a porta do Spring Boot para 8080, alinhando com o Dockerfile e ports
+      # Sobrescreve a porta do Spring Boot para 8080
       - PORT=8080
-      # Configurações para o banco de dados interno (PostgreSQL do Docker Compose)
+      # Configurações para o banco de dados interno
       - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/cantinho_db
       - SPRING_DATASOURCE_USERNAME=postgres
-      # Essa senha deve ser igual à do serviço 'db' abaixo
       - SPRING_DATASOURCE_PASSWORD=minhasenha123 
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      # URL do Frontend para e-mails e CORS (HTTPS e sem porta)
+      - FRONTEND_URL=https://cantinhoemocoes.shop
     depends_on:
       - db
     networks:
@@ -28,19 +29,18 @@ services:
   web:
     container_name: cantinho_frontend
     image: cantinho_frontend:latest
-    # NOVO: Serviço de frontend (Vue/Vite + Nginx)
+    # Serviço de frontend (Vue/Vite + Nginx)
     build:
       context: ./FRONTEND-CANTINHO_EMOCOES
       dockerfile: Dockerfile
       args:
-        # IMPORTANTE: Use o IP público da sua VPS e a porta do backend (8080)
-        # O valor será injetado como VITE_API_URL no build.
-        VITE_API_URL: http://56.125.218.140:8080 
+        # A URL da API agora é o próprio domínio com HTTPS (o Nginx redireciona /api)
+        VITE_API_URL: https://cantinhoemocoes.shop
     ports:
-      # Mapeia a porta 80 do host (acesso padrão HTTP) para a porta 80 do Nginx
-      - "80:80"
+      # Mudamos para 3000 para liberar a porta 80 para o Nginx da VPS
+      - "3000:80"
     depends_on:
-      - app # Garante que o backend suba antes do frontend
+      - app
     networks:
       - cantinho-network
 
@@ -51,7 +51,6 @@ services:
     environment:
       - POSTGRES_DB=cantinho_db
       - POSTGRES_USER=postgres
-      # Essa senha deve ser igual à do serviço 'app' acima
       - POSTGRES_PASSWORD=minhasenha123 
     ports:
       - "5432:5432"

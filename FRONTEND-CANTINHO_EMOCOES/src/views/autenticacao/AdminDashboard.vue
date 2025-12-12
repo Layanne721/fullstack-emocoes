@@ -4,32 +4,33 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import api from '@/services/api';
 
-// Imports de componentes (mantidos do seu original)
+// Ícones (Lucide)
 import { 
-  Users, BookOpen, Activity, BarChart2, LogOut, 
-  Trash2, Edit, CheckCircle, Search, UserPlus 
+  Users, BookOpen, BarChart2, LogOut, 
+  Trash2, Search, UploadCloud, DownloadCloud 
 } from 'lucide-vue-next';
 
-// Configuração inicial
+// --- CONFIGURAÇÃO ---
 const router = useRouter();
 const authStore = useAuthStore();
-const activeTab = ref('usuarios');
+const activeTab = ref('usuarios'); // Controle das abas
 const loading = ref(false);
 
-// Dados
+// --- DADOS ---
 const usuarios = ref([]);
-const atividades = ref([]);
-const emocoes = ref([]);
 const stats = ref({});
 const termoPesquisa = ref('');
 
-// --- VARIÁVEIS PARA BACKUP ---
+// --- VARIÁVEIS DE BACKUP (Do Snippet 1) ---
 const fileInput = ref(null);
 const loadingBackup = ref(false);
 const loadingRestore = ref(false);
+const deletandoId = ref(null);
 
 onMounted(async () => {
-  if (authStore.user?.perfil !== 'ADMIN') {
+  // Verifica permissão (Adaptado para aceitar ADMIN ou ADMINISTRADOR)
+  const perfil = authStore.user?.perfil;
+  if (perfil !== 'ADMIN' && perfil !== 'ADMINISTRADOR') {
     router.push('/');
     return;
   }
@@ -39,13 +40,12 @@ onMounted(async () => {
 async function carregarDadosIniciais() {
   loading.value = true;
   try {
-    // Carrega usuários e estatísticas
     const [usersRes, statsRes] = await Promise.all([
       api.get('/api/admin/usuarios'),
-      api.get('/api/admin/dashboard/stats')
+      api.get('/api/admin/dashboard/stats') // Ou use a lógica de cálculo local se preferir
     ]);
     usuarios.value = usersRes.data;
-    stats.value = statsRes.data;
+    stats.value = statsRes.data; // Espera objeto: { totalUsuarios, totalDiarios, totalAtividades }
   } catch (error) {
     console.error('Erro ao carregar dados:', error);
   } finally {
@@ -53,8 +53,7 @@ async function carregarDadosIniciais() {
   }
 }
 
-// --- FUNÇÕES DE BACKUP E RESTORE ---
-
+// --- LÓGICA DE BACKUP & RESTORE (Do Snippet 1) ---
 async function baixarBackup() {
     loadingBackup.value = true;
     try {
@@ -72,7 +71,7 @@ async function baixarBackup() {
         window.URL.revokeObjectURL(url);
     } catch (e) {
         console.error(e);
-        alert("Erro ao baixar backup. Verifique os logs do servidor.");
+        alert("Erro ao baixar backup. Verifique se o servidor possui as ferramentas instaladas.");
     } finally {
         loadingBackup.value = false;
     }
@@ -87,7 +86,10 @@ async function enviarRestore(event) {
     if (!file) return;
 
     const confirmacao = confirm(
-        `⚠️ PERIGO: Restaurar o banco substituirá TODOS os dados atuais pelos do arquivo "${file.name}".\n\nDeseja continuar?`
+        `⚠️ PERIGO CRÍTICO ⚠️\n\n` +
+        `Você está prestes a restaurar o banco de dados usando o arquivo:\n"${file.name}"\n\n` +
+        `Isso APAGARÁ TODOS os dados atuais e os substituirá pelos do backup.\n` +
+        `Deseja realmente continuar?`
     );
     
     if (!confirmacao) {
@@ -103,204 +105,290 @@ async function enviarRestore(event) {
         await api.post('/api/admin/backup/restore', formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
-        alert("✅ Banco restaurado com sucesso! A página será recarregada.");
+        alert("✅ Sucesso! O banco de dados foi restaurado. A página será recarregada.");
         window.location.reload();
     } catch (e) {
-        const msg = e.response?.data?.error || "Erro na restauração.";
-        alert("❌ Falha: " + msg);
+        const msg = e.response?.data?.error || "Falha na restauração.";
+        alert("❌ Erro: " + msg);
     } finally {
         loadingRestore.value = false;
         event.target.value = '';
     }
 }
 
-// --- FUNÇÕES ORIGINAIS ---
+// --- FILTROS E AÇÕES DE USUÁRIO ---
 
 const usuariosFiltrados = computed(() => {
   if (!termoPesquisa.value) return usuarios.value;
   const termo = termoPesquisa.value.toLowerCase();
+  
   return usuarios.value.filter(u => 
     u.nome.toLowerCase().includes(termo) || 
-    u.email.toLowerCase().includes(termo)
+    (u.email && u.email.toLowerCase().includes(termo))
   );
 });
 
-async function excluirUsuario(id) {
-  if (!confirm('Tem certeza que deseja excluir este usuário?')) return;
+async function excluirUsuario(usuario) {
+  if (usuario.perfil === 'ADMIN' || usuario.perfil === 'ADMINISTRADOR') {
+    alert("⛔ Você não pode excluir administradores.");
+    return;
+  }
+
+  let mensagem = `⚠️ Tem certeza que deseja excluir ${usuario.nome}?`;
+  if (usuario.dependentes?.length > 0) {
+    mensagem += `\n\nATENÇÃO: Isso excluirá também ${usuario.dependentes.length} alunos vinculados!`;
+  }
+
+  if (!confirm(mensagem)) return;
+
+  deletandoId.value = usuario.id;
   try {
-    await api.delete(`/api/admin/usuarios/${id}`);
-    usuarios.value = usuarios.value.filter(u => u.id !== id);
+    await api.delete(`/api/admin/usuarios/${usuario.id}`);
+    usuarios.value = usuarios.value.filter(u => u.id !== usuario.id);
     alert('Usuário excluído com sucesso!');
   } catch (error) {
     alert('Erro ao excluir usuário.');
+  } finally {
+    deletandoId.value = null;
   }
 }
 
-function formatarData(dataArray) {
-  if (!dataArray) return '-';
-  const data = new Date(dataArray[0], dataArray[1]-1, dataArray[2]);
-  return data.toLocaleDateString('pt-BR');
+function formatarData(data) {
+  if (!data) return '-';
+  // Verifica se vem como array [ano, mes, dia] ou string ISO
+  if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2]).toLocaleDateString('pt-BR');
+  return new Date(data).toLocaleDateString('pt-BR');
 }
 
 function logout() {
-  authStore.logout();
+  if (authStore.clearLoginData) authStore.clearLoginData();
+  else authStore.logout();
   router.push('/login');
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50 flex">
+  <div class="min-h-screen bg-[#F0F7FF] flex font-nunito relative overflow-hidden">
     
-    <aside class="w-64 bg-indigo-700 text-white hidden md:flex flex-col">
-      <div class="p-6">
-        <h2 class="text-2xl font-bold flex items-center gap-2">
-          🛡️ Admin
-        </h2>
+    <div class="absolute top-10 left-60 text-4xl animate-float-slow opacity-30 pointer-events-none z-0">📚</div>
+    <div class="absolute bottom-10 right-10 text-5xl animate-bounce-slow opacity-30 pointer-events-none z-0">🎓</div>
+
+    <aside class="w-20 md:w-64 bg-white m-4 rounded-[30px] shadow-sm border border-indigo-50 flex flex-col z-20 transition-all duration-300">
+      <div class="p-6 flex flex-col items-center md:items-start">
+        <h2 class="text-2xl font-black text-[#4F46E5] hidden md:block tracking-tight">Admin<span class="text-orange-400">Panel</span></h2>
+        <span class="md:hidden text-2xl">🛡️</span>
       </div>
       
-      <nav class="flex-1 px-4 space-y-2">
+      <nav class="flex-1 px-4 space-y-3 mt-4">
         <button 
           @click="activeTab = 'usuarios'"
-          :class="['w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors', 
-            activeTab === 'usuarios' ? 'bg-indigo-800' : 'hover:bg-indigo-600']"
+          :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', 
+            activeTab === 'usuarios' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']"
         >
-          <Users size="20" /> Usuários
+          <Users size="22" /> <span class="hidden md:block">Usuários</span>
         </button>
 
         <button 
           @click="activeTab = 'atividades'"
-          :class="['w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors', 
-            activeTab === 'atividades' ? 'bg-indigo-800' : 'hover:bg-indigo-600']"
+          :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', 
+            activeTab === 'atividades' ? 'bg-orange-50 text-orange-500 shadow-sm' : 'text-gray-400 hover:bg-gray-50']"
         >
-          <BookOpen size="20" /> Atividades
+          <BookOpen size="22" /> <span class="hidden md:block">Atividades</span>
         </button>
 
         <button 
           @click="activeTab = 'stats'"
-          :class="['w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors', 
-            activeTab === 'stats' ? 'bg-indigo-800' : 'hover:bg-indigo-600']"
+          :class="['w-full flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-[20px] transition-all font-bold', 
+            activeTab === 'stats' ? 'bg-green-50 text-green-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']"
         >
-          <BarChart2 size="20" /> Estatísticas
+          <BarChart2 size="22" /> <span class="hidden md:block">Estatísticas</span>
         </button>
       </nav>
 
-      <div class="p-4 border-t border-indigo-600">
-        <button @click="logout" class="w-full flex items-center gap-2 text-indigo-200 hover:text-white transition-colors">
-          <LogOut size="20" /> Sair do Sistema
+      <div class="p-4 border-t border-gray-100 mb-2">
+        <button @click="logout" class="w-full flex items-center justify-center md:justify-start gap-2 px-4 py-3 text-red-400 hover:bg-red-50 hover:text-red-500 rounded-[20px] transition-colors font-bold">
+          <LogOut size="20" /> <span class="hidden md:block">Sair</span>
         </button>
       </div>
     </aside>
 
-    <main class="flex-1 overflow-auto">
-      <div class="p-8">
+    <main class="flex-1 p-4 md:p-8 overflow-y-auto z-10 h-screen">
+      
+      <header class="bg-white rounded-[30px] p-6 shadow-sm border-2 border-white mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div>
+          <h1 class="text-2xl font-black text-gray-700">Olá, {{ authStore.user?.nome }}</h1>
+          <p class="text-sm text-gray-400 font-bold">Gerencie o Cantinho das Emoções</p>
+        </div>
         
-        <header class="bg-white rounded-2xl p-6 shadow-sm mb-8 flex justify-between items-center">
-          <div>
-            <h1 class="text-2xl font-bold text-gray-800">Painel Administrativo</h1>
-            <p class="text-gray-500">Bem-vindo, {{ authStore.user?.nome }}</p>
-          </div>
+        <div class="flex items-center gap-3">
+           <input type="file" ref="fileInput" class="hidden" accept=".sql,.dum,.dump" @change="enviarRestore">
+
+           <button 
+              @click="baixarBackup"
+              :disabled="loadingBackup"
+              class="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-[15px] font-bold hover:bg-indigo-100 flex items-center gap-2 transition-all border border-indigo-100 text-sm"
+           >
+              <DownloadCloud size="18" v-if="!loadingBackup"/>
+              <span v-if="loadingBackup" class="animate-spin">⏳</span>
+              <span v-else>Backup</span>
+           </button>
+
+           <button 
+              @click="acionarInputRestore"
+              :disabled="loadingRestore"
+              class="px-4 py-2 bg-orange-50 text-orange-600 rounded-[15px] font-bold hover:bg-orange-100 flex items-center gap-2 transition-all border border-orange-100 text-sm"
+           >
+              <UploadCloud size="18" v-if="!loadingRestore"/>
+              <span v-if="loadingRestore" class="animate-spin">🔄</span>
+              <span v-else>Restaurar</span>
+           </button>
+        </div>
+      </header>
+
+      <div v-if="activeTab === 'usuarios'" class="space-y-6 animate-fade-in">
+        <div class="bg-white rounded-[30px] shadow-sm border-2 border-white overflow-hidden min-h-[500px]">
           
-          <div class="flex items-center gap-3">
-             <input 
-                type="file" 
-                ref="fileInput" 
-                class="hidden" 
-                accept=".sql,.dum,.dump" 
-                @change="enviarRestore"
-            >
-
-             <button 
-                @click="baixarBackup"
-                :disabled="loadingBackup"
-                class="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-100 font-bold"
-             >
-                <span v-if="loadingBackup" class="animate-spin">⏳</span>
-                <span v-else>💾 Backup</span>
-             </button>
-
-             <button 
-                @click="acionarInputRestore"
-                :disabled="loadingRestore"
-                class="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-600 rounded-lg hover:bg-orange-100 transition-colors border border-orange-100 font-bold"
-             >
-                <span v-if="loadingRestore" class="animate-spin">🔄</span>
-                <span v-else>♻️ Restaurar</span>
-             </button>
-          </div>
-        </header>
-
-        <div v-if="activeTab === 'usuarios'" class="space-y-6">
-          <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-            <div class="p-6 border-b border-gray-100 flex justify-between items-center">
-              <h3 class="font-bold text-lg text-gray-700">Gerenciar Usuários</h3>
-              <div class="relative w-64">
-                <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size="18" />
-                <input 
-                  v-model="termoPesquisa"
-                  type="text" 
-                  placeholder="Buscar usuário..." 
-                  class="w-full pl-10 pr-4 py-2 bg-gray-50 rounded-lg border-none focus:ring-2 focus:ring-indigo-500"
-                >
-              </div>
+          <div class="p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
+            <h3 class="font-black text-lg text-indigo-900 flex items-center gap-2">
+              👥 Lista de Usuários
+            </h3>
+            <div class="relative w-full md:w-1/3">
+              <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="20" />
+              <input 
+                v-model="termoPesquisa"
+                type="text" 
+                placeholder="Buscar por nome ou email..." 
+                class="w-full pl-12 pr-4 py-3 bg-white rounded-[20px] border-2 border-transparent focus:border-indigo-200 outline-none font-bold text-gray-600 shadow-sm transition-all placeholder-gray-300"
+              >
             </div>
+          </div>
 
-            <div class="overflow-x-auto">
-              <table class="w-full text-left">
-                <thead class="bg-gray-50 text-xs uppercase text-gray-500 font-semibold">
-                  <tr>
-                    <th class="p-6">Nome</th>
-                    <th class="p-6">Email</th>
-                    <th class="p-6">Perfil</th>
-                    <th class="p-6">Cadastro</th>
-                    <th class="p-6 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                  <tr v-for="user in usuariosFiltrados" :key="user.id" class="hover:bg-gray-50 transition-colors">
-                    <td class="p-6 font-medium text-gray-700">{{ user.nome }}</td>
-                    <td class="p-6 text-gray-500">{{ user.email }}</td>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead class="bg-[#F0F7FF] text-xs uppercase text-gray-400 font-extrabold tracking-wider">
+                <tr>
+                  <th class="p-6 rounded-tl-[30px]">Usuário</th>
+                  <th class="p-6">Função</th>
+                  <th class="p-6">Cadastro</th>
+                  <th class="p-6 text-right rounded-tr-[30px]">Ações</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-50">
+                <template v-for="user in usuariosFiltrados" :key="user.id">
+                  <tr class="hover:bg-[#F9FAFB] transition-colors group">
+                    <td class="p-6">
+                      <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-100 to-white flex items-center justify-center text-2xl shadow-sm border border-indigo-50">
+                           <span v-if="user.perfil === 'ADMIN' || user.perfil === 'ADMINISTRADOR'">🛡️</span>
+                           <span v-else>👨‍🏫</span>
+                        </div>
+                        <div>
+                          <div class="font-extrabold text-gray-700 group-hover:text-indigo-600 transition-colors">{{ user.nome }}</div>
+                          <div class="text-xs text-gray-400 font-bold">{{ user.email }}</div>
+                        </div>
+                      </div>
+                    </td>
                     <td class="p-6">
                       <span :class="{
-                        'bg-purple-100 text-purple-700': user.perfil === 'ADMIN',
-                        'bg-blue-100 text-blue-700': user.perfil === 'RESPONSAVEL',
-                        'bg-green-100 text-green-700': user.perfil === 'DEPENDENTE'
-                      }" class="px-3 py-1 rounded-full text-xs font-bold uppercase">
-                        {{ user.perfil }}
+                        'bg-purple-50 text-purple-600 border-purple-100': user.perfil === 'ADMIN' || user.perfil === 'ADMINISTRADOR',
+                        'bg-blue-50 text-blue-600 border-blue-100': user.perfil === 'RESPONSAVEL',
+                        'bg-green-50 text-green-600 border-green-100': user.perfil === 'DEPENDENTE'
+                      }" class="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wide border">
+                        {{ user.perfil === 'RESPONSAVEL' ? 'PROFESSOR' : user.perfil }}
                       </span>
                     </td>
-                    <td class="p-6 text-gray-500">{{ formatarData(user.dataCadastro) }}</td>
+                    <td class="p-6 text-sm font-bold text-gray-400">{{ formatarData(user.dataCadastro) }}</td>
                     <td class="p-6 text-right">
                       <button 
-                        @click="excluirUsuario(user.id)"
-                        class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Excluir Usuário"
+                        @click="excluirUsuario(user)"
+                        :disabled="deletandoId === user.id"
+                        class="p-2 bg-white text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-gray-100 hover:border-red-100 shadow-sm"
+                        title="Excluir"
                       >
-                        <Trash2 size="18" />
+                        <span v-if="deletandoId === user.id" class="animate-spin text-xs">⏳</span>
+                        <Trash2 size="18" v-else />
                       </button>
                     </td>
                   </tr>
-                </tbody>
-              </table>
-            </div>
+
+                  <tr v-if="user.dependentes && user.dependentes.length > 0" class="bg-[#F8FAFC]">
+                    <td colspan="4" class="p-0">
+                      <div class="pl-20 pr-6 py-4 space-y-3">
+                         <div class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                           <span>↘</span> Alunos de {{ user.nome }}
+                         </div>
+                         <div v-for="aluno in user.dependentes" :key="aluno.id" 
+                              class="flex items-center justify-between bg-white p-3 rounded-[20px] border border-blue-50 shadow-sm hover:shadow-md transition-all">
+                            <div class="flex items-center gap-3">
+                              <div class="w-8 h-8 rounded-full bg-green-50 text-sm flex items-center justify-center border border-green-100">🎓</div>
+                              <span class="font-bold text-gray-600 text-sm">{{ aluno.nome }}</span>
+                            </div>
+                            <span class="text-[10px] font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded-lg">{{ formatarData(aluno.dataCadastro) }}</span>
+                         </div>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
           </div>
         </div>
-
-        <div v-if="activeTab === 'stats'" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div class="bg-white p-6 rounded-2xl shadow-sm border-l-4 border-blue-500">
-            <p class="text-sm text-gray-500 font-bold uppercase">Total Usuários</p>
-            <p class="text-4xl font-bold text-gray-800 mt-2">{{ stats.totalUsuarios || 0 }}</p>
-          </div>
-          <div class="bg-white p-6 rounded-2xl shadow-sm border-l-4 border-green-500">
-            <p class="text-sm text-gray-500 font-bold uppercase">Total Diários</p>
-            <p class="text-4xl font-bold text-gray-800 mt-2">{{ stats.totalDiarios || 0 }}</p>
-          </div>
-          <div class="bg-white p-6 rounded-2xl shadow-sm border-l-4 border-purple-500">
-             <p class="text-sm text-gray-500 font-bold uppercase">Total Atividades</p>
-             <p class="text-4xl font-bold text-gray-800 mt-2">{{ stats.totalAtividades || 0 }}</p>
-          </div>
-        </div>
-
       </div>
+
+      <div v-if="activeTab === 'stats'" class="animate-fade-in">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="bg-white p-8 rounded-[30px] shadow-sm border border-indigo-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
+             <div class="absolute -right-4 -top-4 w-24 h-24 bg-indigo-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
+             <p class="text-xs font-black text-indigo-400 uppercase tracking-wider relative z-10">Total de Usuários</p>
+             <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalUsuarios || 0 }}</p>
+          </div>
+
+          <div class="bg-white p-8 rounded-[30px] shadow-sm border border-green-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
+             <div class="absolute -right-4 -top-4 w-24 h-24 bg-green-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
+             <p class="text-xs font-black text-green-500 uppercase tracking-wider relative z-10">Diários de Emoções</p>
+             <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalDiarios || 0 }}</p>
+          </div>
+
+          <div class="bg-white p-8 rounded-[30px] shadow-sm border border-orange-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
+             <div class="absolute -right-4 -top-4 w-24 h-24 bg-orange-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
+             <p class="text-xs font-black text-orange-400 uppercase tracking-wider relative z-10">Atividades Criadas</p>
+             <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalAtividades || 0 }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="activeTab === 'atividades'" class="animate-fade-in">
+        <div class="bg-white rounded-[30px] p-10 text-center shadow-sm border-2 border-dashed border-gray-200">
+            <BookOpen size="48" class="mx-auto text-gray-300 mb-4" />
+            <h3 class="text-xl font-bold text-gray-400">Gerenciamento de Atividades</h3>
+            <p class="text-gray-400 text-sm mt-2">Funcionalidade em desenvolvimento...</p>
+        </div>
+      </div>
+
     </main>
   </div>
 </template>
+
+<style scoped>
+.font-nunito { font-family: 'Nunito', sans-serif; }
+
+/* Animações suaves */
+@keyframes floatSlow { 
+    0%, 100% { transform: translateY(0px); } 
+    50% { transform: translateY(-15px); } 
+}
+.animate-float-slow { animation: floatSlow 4s ease-in-out infinite; }
+.animate-bounce-slow { animation: floatSlow 3s ease-in-out infinite; animation-delay: 1.5s; }
+
+.animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Scrollbar personalizada */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #E0E7FF; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #C7D2FE; }
+</style>
