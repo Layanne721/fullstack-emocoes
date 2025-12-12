@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
-// --- IMPORTAÇÃO DAS VIEWS ---
+// --- VIEWS ---
 const LoginView = () => import('../views/autenticacao/LoginView.vue')
 const RegistroView = () => import('../views/autenticacao/RegistroView.vue')
 const RecuperarSenhaView = () => import('../views/autenticacao/RecuperarSenhaView.vue')
@@ -25,8 +25,6 @@ const ResponsavelDashboardView = () => import('../views/responsavel/ResponsavelD
 const JogosView = () => import('../views/jogos/JogosView.vue')
 const JogoRespiracaoView = () => import('../views/jogos/JogoRespiracaoView.vue')
 const JogoBalaoView = () => import('../views/jogos/JogoBalaoView.vue')
-
-// --- NOVOS JOGOS (ADICIONADOS) ---
 const JogoMemoriaView = () => import('../views/jogos/JogoMemoriaView.vue')
 const JogoNojinhoView = () => import('../views/jogos/JogoNojinhoView.vue')
 const JogoAlegriaView = () => import('../views/jogos/JogoAlegriaView.vue')
@@ -69,49 +67,42 @@ const router = createRouter({
     { path: '/emocoes', name: 'emocoes', component: EmocoesView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/responsavel', name: 'responsavel-dashboard', component: ResponsavelDashboardView, meta: { requiresAuth: true } },
     
-    // Jogos (Menu Principal)
+    // Jogos
     { path: '/jogos', name: 'jogos', component: JogosView, meta: { requiresAuth: true, requiresChild: true } },
-    
-    // Jogos Específicos
     { path: '/jogos/respiracao', name: 'jogo-respiracao', component: JogoRespiracaoView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/jogos/balao', name: 'jogo-balao', component: JogoBalaoView, meta: { requiresAuth: true, requiresChild: true } },
-    
-    // --- ROTAS DOS NOVOS JOGOS ---
     { path: '/jogos/memoria', name: 'jogo-memoria', component: JogoMemoriaView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/jogos/nojinho', name: 'jogo-nojinho', component: JogoNojinhoView, meta: { requiresAuth: true, requiresChild: true } },
     { path: '/jogos/alegria', name: 'jogo-alegria', component: JogoAlegriaView, meta: { requiresAuth: true, requiresChild: true } },
   ]
 })
 
-// --- GUARDA DE ROTAS REFORÇADA ---
+// --- GUARDA DE ROTAS (CORRIGIDO PARA EVITAR LOOP) ---
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore()
   
   const isAuthenticated = !!authStore.token
   const isChildSelected = !!authStore.criancaSelecionada
   const userRole = authStore.user?.perfil
-
+  
   const publicPages = ['/login', '/registro', '/recuperar-senha', '/resetar-senha'];
   const authRequired = !publicPages.includes(to.path);
   const isAdmin = userRole === 'ADMINISTRADOR' || userRole === 'ADMIN';
 
-  // 1. Não autenticado tentando acessar área restrita
+  // 1. Não logado tentando acessar página privada -> Login
   if (authRequired && !isAuthenticated) {
-    return next('/login')
+    return next('/login');
   }
 
-  // 2. Se já está logado e tenta ir para Login
+  // 2. Logado tentando ir para Login -> Redireciona para Home/Admin
   if (isAuthenticated && publicPages.includes(to.path)) {
     if (isAdmin) return next('/admin');
     return next('/selecionar-perfil');
   }
 
-  // 3. REGRA CRÍTICA: Impedir ADMIN de entrar em rotas de Pais/Crianças
-  // Correção: Permitir sub-rotas como /admin/dados
-  if (isAdmin) {
-    if (!to.path.startsWith('/admin')) {
+  // 3. Admin tentando acessar área de Criança -> Bloqueia
+  if (to.meta.requiresChild && isAdmin) {
       return next('/admin');
-    }
   }
 
   // 4. Bloquear não-admins de acessar /admin
@@ -119,12 +110,12 @@ router.beforeEach((to, from, next) => {
     return next('/selecionar-perfil');
   }
 
-  // 5. Fluxo normal de Pais/Crianças
+  // 5. Fluxo normal de Crianças (precisa selecionar perfil)
   if (to.meta.requiresChild && isAuthenticated && !isChildSelected && !isAdmin) {
     return next('/selecionar-perfil');
   }
 
-  next()
+  next();
 })
 
-export default router
+export default router;
