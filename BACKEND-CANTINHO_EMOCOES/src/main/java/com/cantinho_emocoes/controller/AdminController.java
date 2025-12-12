@@ -40,7 +40,6 @@ public class AdminController {
         this.passwordEncoder = passwordEncoder;
     }
 
-    // --- DASHBOARD ---
     @GetMapping("/dashboard/stats")
     public ResponseEntity<DashboardStatsDTO> getDashboardStats() {
         long totalUsuarios = usuarioRepository.count();
@@ -49,12 +48,10 @@ public class AdminController {
         return ResponseEntity.ok(new DashboardStatsDTO(totalUsuarios, totalDiarios, totalAtividades));
     }
 
-    // =======================================================
-    // 1. GERENCIAMENTO DE PAIS E ADMINS (Sem Responsável)
-    // =======================================================
+    // --- USUÁRIOS (PAIS/ADMINS) ---
     @GetMapping("/usuarios")
     public ResponseEntity<List<Usuario>> listarPaisEAdmins() {
-        // Filtra apenas quem NÃO tem responsável (ou seja, é Pai ou Admin)
+        // Retorna apenas quem NÃO tem responsável (Pais e Admins)
         List<Usuario> lista = usuarioRepository.findAll().stream()
                 .filter(u -> u.getResponsavel() == null)
                 .collect(Collectors.toList());
@@ -62,21 +59,17 @@ public class AdminController {
     }
 
     @PostMapping("/usuarios")
-    public ResponseEntity<?> salvarPaiOuAdmin(@RequestBody Usuario usuario) {
+    public ResponseEntity<?> salvarUsuario(@RequestBody Usuario usuario) {
         if (usuario.getId() != null && usuarioRepository.existsById(usuario.getId())) {
-            // Edição
             Usuario existente = usuarioRepository.findById(usuario.getId()).get();
             existente.setNome(usuario.getNome());
             existente.setEmail(usuario.getEmail());
             existente.setPerfil(usuario.getPerfil());
-            
-            // Verifica a senha usando getPassword()
             if (usuario.getPassword() != null && !usuario.getPassword().isEmpty()) {
                 existente.setSenha(passwordEncoder.encode(usuario.getPassword()));
             }
             return ResponseEntity.ok(usuarioRepository.save(existente));
         } else {
-            // Criação
             if (usuarioRepository.findByEmail(usuario.getEmail()).isPresent()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Email já existe"));
             }
@@ -88,12 +81,10 @@ public class AdminController {
         }
     }
 
-    // =======================================================
-    // 2. GERENCIAMENTO DE ALUNOS (Com Responsável)
-    // =======================================================
+    // --- ALUNOS (DEPENDENTES) ---
     @GetMapping("/alunos")
     public ResponseEntity<List<Usuario>> listarAlunos() {
-        // Filtra apenas quem TEM responsável (Alunos)
+        // Retorna apenas quem TEM responsável (Alunos)
         List<Usuario> lista = usuarioRepository.findAll().stream()
                 .filter(u -> u.getResponsavel() != null)
                 .collect(Collectors.toList());
@@ -102,16 +93,13 @@ public class AdminController {
 
     @PostMapping("/alunos")
     public ResponseEntity<?> salvarAluno(@RequestBody Usuario aluno) {
-        // Validação: Aluno precisa de um Responsável
         if (aluno.getResponsavel() == null || aluno.getResponsavel().getId() == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "É obrigatório selecionar um Responsável para o aluno."));
+            return ResponseEntity.badRequest().body(Map.of("error", "Responsável obrigatório"));
         }
-
         Usuario responsavel = usuarioRepository.findById(aluno.getResponsavel().getId())
                 .orElseThrow(() -> new RuntimeException("Responsável não encontrado"));
 
         if (aluno.getId() != null && usuarioRepository.existsById(aluno.getId())) {
-            // Edição
             Usuario existente = usuarioRepository.findById(aluno.getId()).get();
             existente.setNome(aluno.getNome());
             existente.setDataNascimento(aluno.getDataNascimento());
@@ -119,30 +107,26 @@ public class AdminController {
             existente.setAvatarUrl(aluno.getAvatarUrl());
             return ResponseEntity.ok(usuarioRepository.save(existente));
         } else {
-            // Criação
             aluno.setResponsavel(responsavel);
             aluno.setPerfil(Perfil.CRIANCA);
             aluno.setDataCadastro(LocalDate.now());
-            // Define senha padrão criptografada
             aluno.setSenha(passwordEncoder.encode("123456")); 
             return ResponseEntity.ok(usuarioRepository.save(aluno));
         }
     }
 
-    // Exclusão Genérica (Serve para Pai, Admin ou Aluno)
+    // --- DELETAR QUALQUER UM ---
     @DeleteMapping("/usuarios/{id}")
-    public ResponseEntity<?> excluirQualquerUsuario(@PathVariable Long id) {
+    public ResponseEntity<?> excluirUsuario(@PathVariable Long id) {
         try {
             usuarioService.deletarUsuarioPeloAdmin(id);
-            return ResponseEntity.ok(Map.of("message", "Usuário excluído com sucesso!"));
+            return ResponseEntity.ok(Map.of("message", "Excluído com sucesso!"));
         } catch (Exception e) {
             return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         }
     }
 
-    // =======================================================
-    // 3. GERENCIAMENTO DE ATIVIDADES
-    // =======================================================
+    // --- ATIVIDADES E DIÁRIOS ---
     @GetMapping("/atividades")
     public ResponseEntity<List<Atividade>> listarAtividades() {
         return ResponseEntity.ok(atividadeRepository.findAll());
@@ -151,8 +135,7 @@ public class AdminController {
     @PostMapping("/atividades")
     public ResponseEntity<?> salvarAtividade(@RequestBody Atividade atividade) {
         if (atividade.getAluno() != null && atividade.getAluno().getId() != null) {
-             Usuario aluno = usuarioRepository.findById(atividade.getAluno().getId())
-                 .orElseThrow(() -> new RuntimeException("Aluno vinculado não existe"));
+             Usuario aluno = usuarioRepository.findById(atividade.getAluno().getId()).orElse(null);
              atividade.setAluno(aluno);
         }
         return ResponseEntity.ok(atividadeRepository.save(atividade));
@@ -160,21 +143,15 @@ public class AdminController {
 
     @DeleteMapping("/atividades/{id}")
     public ResponseEntity<?> excluirAtividade(@PathVariable Long id) {
-        if (atividadeRepository.existsById(id)) {
-            atividadeRepository.deleteById(id);
-            return ResponseEntity.ok(Map.of("message", "Atividade excluída!"));
-        }
-        return ResponseEntity.status(404).body(Map.of("error", "Atividade não encontrada"));
+        atividadeRepository.deleteById(id);
+        return ResponseEntity.ok(Map.of("message", "Atividade excluída"));
     }
 
-    // =======================================================
-    // 4. GERENCIAMENTO DE DIÁRIOS
-    // =======================================================
     @GetMapping("/diarios")
     public ResponseEntity<List<Diario>> listarDiarios() {
         return ResponseEntity.ok(diarioRepository.findAll());
     }
-
+    
     @PostMapping("/diarios")
     public ResponseEntity<?> salvarDiario(@RequestBody Diario diario) {
         return ResponseEntity.ok(diarioRepository.save(diario));
@@ -182,10 +159,7 @@ public class AdminController {
 
     @DeleteMapping("/diarios/{id}")
     public ResponseEntity<?> excluirDiario(@PathVariable Long id) {
-        if (diarioRepository.existsById(id)) {
-            diarioRepository.deleteById(id);
-            return ResponseEntity.ok(Map.of("message", "Diário excluído!"));
-        }
-        return ResponseEntity.status(404).body(Map.of("error", "Diário não encontrado"));
+        diarioRepository.deleteById(id);
+        return ResponseEntity.ok(Map.of("message", "Diário excluído"));
     }
 }
