@@ -31,6 +31,9 @@ public class BackupService {
     @Value("${spring.datasource.password}")
     private String dbPassword;
 
+    /**
+     * Gera um backup SQL (Texto) para download.
+     */
     public File gerarBackup() throws IOException, InterruptedException {
         DatabaseConfig config = parseDatabaseConfig(dbUrl);
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
@@ -40,49 +43,66 @@ public class BackupService {
             "pg_dump", "-h", config.host, "-p", config.port, "-U", dbUser, "-d", config.dbName,
             "--clean", "--if-exists", "--no-owner", "--no-acl", "-f", backupFile.getAbsolutePath()
         );
+        
         Map<String, String> env = pb.environment();
-        if (dbPassword != null) env.put("PGPASSWORD", dbPassword);
+        if (dbPassword != null && !dbPassword.isEmpty()) {
+            env.put("PGPASSWORD", dbPassword);
+        }
 
-        logger.info("Backup SQL iniciado: {}", backupFile.getAbsolutePath());
+        logger.info("Iniciando geração de backup SQL: {}", backupFile.getAbsolutePath());
         executarProcesso(pb, "PG_DUMP");
         return backupFile;
     }
 
+    /**
+     * Restaura backup, detectando automaticamente se é SQL (texto) ou DUMP (binário).
+     */
     public void restaurarBackup(MultipartFile file) throws IOException, InterruptedException {
         DatabaseConfig config = parseDatabaseConfig(dbUrl);
         String originalName = file.getOriginalFilename();
         if (originalName == null) originalName = "backup.dump";
 
-        // Se terminar com .sql é texto, caso contrário é binário (dump)
+        // Lógica de detecção: Se termina em .sql é texto (psql), senão é binário (pg_restore)
         boolean isSql = originalName.toLowerCase().endsWith(".sql");
         Path tempFile = Files.createTempFile("restore_", isSql ? ".sql" : ".dump");
 
         try {
             file.transferTo(tempFile);
-            logger.info("Restaurando {} (Modo: {})", originalName, isSql ? "PSQL" : "PG_RESTORE");
+            logger.info("Iniciando restauração de '{}'. Modo detectado: {}", originalName, isSql ? "PSQL (Texto)" : "PG_RESTORE (Binário)");
 
             ProcessBuilder pb;
             if (isSql) {
-                pb = new ProcessBuilder("psql", "-h", config.host, "-p", config.port, "-U", dbUser, "-d", config.dbName, "-f", tempFile.toAbsolutePath().toString());
+                // Modo Texto (.sql) - Usa psql
+                pb = new ProcessBuilder(
+                    "psql", "-h", config.host, "-p", config.port, "-U", dbUser, "-d", config.dbName, 
+                    "-f", tempFile.toAbsolutePath().toString()
+                );
             } else {
-                pb = new ProcessBuilder("pg_restore", "-h", config.host, "-p", config.port, "-U", dbUser, "-d", config.dbName,
-                        "--clean", "--if-exists", "--no-owner", "--no-acl", "--verbose", tempFile.toAbsolutePath().toString());
+                // Modo Binário (.dump, .backup) - Usa pg_restore
+                pb = new ProcessBuilder(
+                    "pg_restore", "-h", config.host, "-p", config.port, "-U", dbUser, "-d", config.dbName,
+                    "--clean", "--if-exists", "--no-owner", "--no-acl", "--verbose", 
+                    tempFile.toAbsolutePath().toString()
+                );
             }
 
             Map<String, String> env = pb.environment();
-            if (dbPassword != null) env.put("PGPASSWORD", dbPassword);
+            if (dbPassword != null && !dbPassword.isEmpty()) {
+                env.put("PGPASSWORD", dbPassword);
+            }
 
             executarProcesso(pb, isSql ? "PSQL" : "PG_RESTORE");
-            logger.info("Restauração concluída.");
+            logger.info("Restauração concluída com sucesso.");
+
         } finally {
-            try { Files.deleteIfExists(tempFile); } catch (Exception e) {}
+            try { Files.deleteIfExists(tempFile); } catch (Exception e) { logger.warn("Falha ao limpar temp: {}", e.getMessage()); }
         }
     }
 
-    private void executarProcesso(ProcessBuilder pb, String nome) throws IOException, InterruptedException {
+    private void executarProcesso(ProcessBuilder pb, String nomeProcesso) throws IOException, InterruptedException {
         Process process = pb.start();
         
-        // Lê as saídas de erro e padrão em threads separadas para não travar
+        // Lê logs em threads separadas para não travar
         StreamGobbler errorGobbler = new StreamGobbler(process.getErrorStream());
         StreamGobbler outputGobbler = new StreamGobbler(process.getInputStream());
         errorGobbler.start();
@@ -91,16 +111,17 @@ public class BackupService {
         boolean finished = process.waitFor(10, TimeUnit.MINUTES);
         if (!finished) {
             process.destroy();
-            throw new IOException("Timeout: O processo " + nome + " demorou muito.");
+            throw new IOException("Timeout: O processo " + nomeProcesso + " demorou muito.");
         }
 
-        // pg_restore retorna 1 em caso de Warnings (avisos), o que é aceitável.
-        int exit = process.exitValue();
-        if (exit != 0 && !(nome.equals("PG_RESTORE") && exit == 1)) {
+        int exitCode = process.exitValue();
+        // pg_restore retorna 1 para avisos (warnings) não fatais. Consideramos sucesso.
+        boolean sucesso = (exitCode == 0) || (nomeProcesso.equals("PG_RESTORE") && exitCode == 1);
+
+        if (!sucesso) {
             String erros = errorGobbler.getOutput();
-            logger.error("Erro no {}: {}", nome, erros);
-            // Lança o erro real para o usuário ver no frontend
-            throw new IOException("Falha no " + nome + " (Exit " + exit + "): " + erros);
+            logger.error("Erro crítico no {}: {}", nomeProcesso, erros);
+            throw new IOException("Falha no " + nomeProcesso + " (Exit " + exitCode + "). Detalhes: " + erros);
         }
     }
 
@@ -126,6 +147,7 @@ public class BackupService {
 
     private record DatabaseConfig(String host, String port, String dbName) {}
 
+    // Classe auxiliar para ler as saídas do terminal sem travar o Java
     private static class StreamGobbler extends Thread {
         private final java.io.InputStream is;
         private final StringBuilder output = new StringBuilder();
