@@ -1,19 +1,15 @@
 package com.cantinho_emocoes.controller;
 
 import com.cantinho_emocoes.dto.DashboardStatsDTO;
-import com.cantinho_emocoes.model.Atividade;
-import com.cantinho_emocoes.model.Diario;
-import com.cantinho_emocoes.model.Perfil;
-import com.cantinho_emocoes.model.Usuario; 
-import com.cantinho_emocoes.repository.AtividadeRepository;
-import com.cantinho_emocoes.repository.DiarioRepository;
-import com.cantinho_emocoes.repository.UsuarioRepository;
+import com.cantinho_emocoes.model.*;
+import com.cantinho_emocoes.repository.*;
 import com.cantinho_emocoes.service.UsuarioService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -22,117 +18,152 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/admin")
 public class AdminController {
 
-    private final UsuarioService usuarioService;
     private final UsuarioRepository usuarioRepository;
     private final DiarioRepository diarioRepository;
     private final AtividadeRepository atividadeRepository;
+    private final UsuarioService usuarioService;
     private final PasswordEncoder passwordEncoder;
 
-    public AdminController(UsuarioService usuarioService, 
-                           UsuarioRepository usuarioRepository,
+    public AdminController(UsuarioRepository usuarioRepository, 
                            DiarioRepository diarioRepository,
                            AtividadeRepository atividadeRepository,
+                           UsuarioService usuarioService,
                            PasswordEncoder passwordEncoder) {
-        this.usuarioService = usuarioService;
         this.usuarioRepository = usuarioRepository;
         this.diarioRepository = diarioRepository;
         this.atividadeRepository = atividadeRepository;
+        this.usuarioService = usuarioService;
         this.passwordEncoder = passwordEncoder;
     }
 
     @GetMapping("/dashboard/stats")
     public ResponseEntity<DashboardStatsDTO> getDashboardStats() {
-        long totalUsuarios = usuarioRepository.count();
-        long totalDiarios = diarioRepository.count();
-        long totalAtividades = atividadeRepository.count();
-        return ResponseEntity.ok(new DashboardStatsDTO(totalUsuarios, totalDiarios, totalAtividades));
+        return ResponseEntity.ok(new DashboardStatsDTO(
+            usuarioRepository.count(),
+            diarioRepository.count(),
+            atividadeRepository.count()
+        ));
     }
 
-    // --- USUÁRIOS (PAIS/ADMINS) ---
+    // --- DTOs PARA EVITAR LOOPS INFINITOS ---
+    public record UsuarioSimplesDTO(Long id, String nome, String email, String perfil, String responsavelNome) {}
+    public record AtividadeDTO(Long id, String titulo, String descricao, Long alunoId, String alunoNome) {}
+    public record DiarioDTO(Long id, String emocao, int intensidade, String relato, LocalDateTime dataRegistro, Long alunoId, String alunoNome) {}
+
+    // --- USUÁRIOS ---
     @GetMapping("/usuarios")
-    public ResponseEntity<List<Usuario>> listarPaisEAdmins() {
-        // Retorna apenas quem NÃO tem responsável (Pais e Admins)
-        List<Usuario> lista = usuarioRepository.findAll().stream()
-                .filter(u -> u.getResponsavel() == null)
-                .collect(Collectors.toList());
+    public ResponseEntity<List<UsuarioSimplesDTO>> listarUsuarios() {
+        List<UsuarioSimplesDTO> lista = usuarioRepository.findAll().stream()
+            .filter(u -> u.getResponsavel() == null) // Apenas Pais/Admins
+            .map(u -> new UsuarioSimplesDTO(u.getId(), u.getNome(), u.getEmail(), u.getPerfil().name(), null))
+            .collect(Collectors.toList());
         return ResponseEntity.ok(lista);
     }
 
-    // DTO Interno para evitar problemas com @JsonIgnore na senha
-    public record UsuarioAdminRequest(Long id, String nome, String email, String senha, Perfil perfil) {}
+    public record UsuarioRequest(Long id, String nome, String email, String senha, Perfil perfil) {}
 
     @PostMapping("/usuarios")
-    public ResponseEntity<?> salvarUsuario(@RequestBody UsuarioAdminRequest request) {
-        Usuario usuario;
-
-        // Edição
-        if (request.id() != null && usuarioRepository.existsById(request.id())) {
-            usuario = usuarioRepository.findById(request.id()).get();
-            usuario.setNome(request.nome());
-            usuario.setEmail(request.email());
-            usuario.setPerfil(request.perfil());
-        } 
-        // Novo Usuário
-        else {
-            if (usuarioRepository.findByEmail(request.email()).isPresent()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Email já existe"));
-            }
-            usuario = new Usuario();
-            usuario.setNome(request.nome());
-            usuario.setEmail(request.email());
-            usuario.setPerfil(request.perfil());
-            usuario.setDataCadastro(LocalDate.now());
-            // Avatar padrão se não tiver
-            usuario.setAvatarUrl("https://ui-avatars.com/api/?name=" + request.nome().replace(" ", "+"));
+    public ResponseEntity<?> salvarUsuario(@RequestBody UsuarioRequest req) {
+        Usuario u;
+        if (req.id != null) {
+            u = usuarioRepository.findById(req.id).orElseThrow();
+            u.setNome(req.nome);
+            u.setEmail(req.email);
+            u.setPerfil(req.perfil);
+        } else {
+            if (usuarioRepository.findByEmail(req.email).isPresent()) return ResponseEntity.badRequest().body("Email já existe");
+            u = new Usuario();
+            u.setNome(req.nome);
+            u.setEmail(req.email);
+            u.setPerfil(req.perfil);
+            u.setDataCadastro(LocalDate.now());
+            u.setAvatarUrl("https://ui-avatars.com/api/?name=" + req.nome.replace(" ", "+"));
         }
-
-        // Atualiza a senha SE ela foi enviada no formulário
-        if (request.senha() != null && !request.senha().isBlank()) {
-            usuario.setSenha(passwordEncoder.encode(request.senha()));
+        if (req.senha != null && !req.senha.isBlank()) {
+            u.setSenha(passwordEncoder.encode(req.senha));
         }
-
-        usuarioRepository.save(usuario);
-        return ResponseEntity.ok(Map.of("message", "Usuário salvo com sucesso!"));
+        usuarioRepository.save(u);
+        return ResponseEntity.ok(Map.of("message", "Salvo com sucesso!"));
     }
 
-    // --- ALUNOS (DEPENDENTES) ---
-    @GetMapping("/alunos")
-    public ResponseEntity<List<Usuario>> listarAlunos() {
-        List<Usuario> lista = usuarioRepository.findAll().stream()
-                .filter(u -> u.getResponsavel() != null)
-                .collect(Collectors.toList());
-        return ResponseEntity.ok(lista);
-    }
-
-    // --- DELETAR ---
     @DeleteMapping("/usuarios/{id}")
     public ResponseEntity<?> excluirUsuario(@PathVariable Long id) {
         try {
             usuarioService.deletarUsuarioPeloAdmin(id);
-            return ResponseEntity.ok(Map.of("message", "Excluído com sucesso!"));
+            return ResponseEntity.ok(Map.of("message", "Excluído!"));
         } catch (Exception e) {
-            return ResponseEntity.status(400).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    // --- ALUNOS ---
+    @GetMapping("/alunos")
+    public ResponseEntity<List<UsuarioSimplesDTO>> listarAlunos() {
+        List<UsuarioSimplesDTO> lista = usuarioRepository.findAll().stream()
+            .filter(u -> u.getResponsavel() != null) // Apenas Alunos
+            .map(u -> new UsuarioSimplesDTO(u.getId(), u.getNome(), null, "CRIANCA", u.getResponsavel().getNome()))
+            .collect(Collectors.toList());
+        return ResponseEntity.ok(lista);
     }
 
     // --- ATIVIDADES ---
     @GetMapping("/atividades")
-    public ResponseEntity<List<Atividade>> listarAtividades() {
-        return ResponseEntity.ok(atividadeRepository.findAll());
+    public ResponseEntity<List<AtividadeDTO>> listarAtividades() {
+        List<AtividadeDTO> lista = atividadeRepository.findAll().stream()
+            .map(a -> new AtividadeDTO(a.getId(), a.getTitulo(), a.getDescricao(), 
+                a.getAluno() != null ? a.getAluno().getId() : null,
+                a.getAluno() != null ? a.getAluno().getNome() : "Geral"))
+            .collect(Collectors.toList());
+        return ResponseEntity.ok(lista);
     }
 
     @PostMapping("/atividades")
     public ResponseEntity<?> salvarAtividade(@RequestBody Atividade atividade) {
         if (atividade.getAluno() != null && atividade.getAluno().getId() != null) {
-             Usuario aluno = usuarioRepository.findById(atividade.getAluno().getId()).orElse(null);
-             atividade.setAluno(aluno);
+            Usuario aluno = usuarioRepository.findById(atividade.getAluno().getId()).orElse(null);
+            atividade.setAluno(aluno);
+        } else {
+            atividade.setAluno(null);
         }
-        return ResponseEntity.ok(atividadeRepository.save(atividade));
+        atividadeRepository.save(atividade);
+        return ResponseEntity.ok(Map.of("message", "Atividade salva!"));
     }
 
     @DeleteMapping("/atividades/{id}")
     public ResponseEntity<?> excluirAtividade(@PathVariable Long id) {
         atividadeRepository.deleteById(id);
-        return ResponseEntity.ok(Map.of("message", "Atividade excluída"));
+        return ResponseEntity.ok(Map.of("message", "Excluída!"));
+    }
+
+    // --- DIÁRIOS (Nova Funcionalidade) ---
+    @GetMapping("/diarios")
+    public ResponseEntity<List<DiarioDTO>> listarDiarios() {
+        List<DiarioDTO> lista = diarioRepository.findAll().stream()
+            .map(d -> new DiarioDTO(d.getId(), d.getEmocao(), d.getIntensidade(), d.getRelato(), 
+                d.getDataRegistro(), d.getDependente().getId(), d.getDependente().getNome()))
+            .collect(Collectors.toList());
+        return ResponseEntity.ok(lista);
+    }
+
+    public record DiarioRequest(Long id, String emocao, Integer intensidade, String relato, LocalDateTime dataRegistro) {}
+
+    @PostMapping("/diarios")
+    public ResponseEntity<?> salvarDiario(@RequestBody DiarioRequest req) {
+        Diario d = diarioRepository.findById(req.id)
+            .orElseThrow(() -> new RuntimeException("Diário não encontrado"));
+        
+        if (req.emocao != null) d.setEmocao(req.emocao);
+        if (req.intensidade != null) d.setIntensidade(req.intensidade);
+        if (req.relato != null) d.setRelato(req.relato);
+        if (req.dataRegistro != null) d.setDataRegistro(req.dataRegistro); // Permite mudar a data!
+
+        diarioRepository.save(d);
+        return ResponseEntity.ok(Map.of("message", "Diário atualizado!"));
+    }
+
+    @DeleteMapping("/diarios/{id}")
+    public ResponseEntity<?> excluirDiario(@PathVariable Long id) {
+        diarioRepository.deleteById(id);
+        return ResponseEntity.ok(Map.of("message", "Excluído!"));
     }
 }
