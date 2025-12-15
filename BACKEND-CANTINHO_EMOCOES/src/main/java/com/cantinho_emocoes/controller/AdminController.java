@@ -45,12 +45,9 @@ public class AdminController {
         ));
     }
 
-    // --- DTOs (Ajustados para o modelo real de Atividade) ---
+    // --- DTOs DE LEITURA ---
     public record UsuarioSimplesDTO(Long id, String nome, String email, String perfil, String responsavelNome) {}
-    
-    // CORREÇÃO: Usando tipo, conteudo e dataRealizacao em vez de titulo/descricao
     public record AtividadeDTO(Long id, String tipo, String conteudo, LocalDateTime dataRealizacao, Long alunoId, String alunoNome) {}
-    
     public record DiarioDTO(Long id, String emocao, int intensidade, String relato, LocalDateTime dataRegistro, Long alunoId, String alunoNome) {}
 
     // --- USUÁRIOS ---
@@ -109,15 +106,19 @@ public class AdminController {
         return ResponseEntity.ok(lista);
     }
 
-    // --- ATIVIDADES (CORRIGIDO) ---
+    // --- ATIVIDADES (CORRIGIDO COM DTO) ---
+    
+    // Novo Record para receber os dados corretamente
+    public record AtividadeRequest(Long id, String tipo, String conteudo, LocalDateTime dataRealizacao, Usuario aluno) {}
+
     @GetMapping("/atividades")
     public ResponseEntity<List<AtividadeDTO>> listarAtividades() {
         List<AtividadeDTO> lista = atividadeRepository.findAll().stream()
             .map(a -> new AtividadeDTO(
                 a.getId(), 
-                a.getTipo(),      // Agora usa getTipo()
-                a.getConteudo(),  // Agora usa getConteudo()
-                a.getDataRealizacao(), // Adicionado Data
+                a.getTipo(), 
+                a.getConteudo(),
+                a.getDataRealizacao(),
                 a.getAluno() != null ? a.getAluno().getId() : null,
                 a.getAluno() != null ? a.getAluno().getNome() : "Geral"))
             .collect(Collectors.toList());
@@ -125,18 +126,34 @@ public class AdminController {
     }
 
     @PostMapping("/atividades")
-    public ResponseEntity<?> salvarAtividade(@RequestBody Atividade atividade) {
-        // Se for edição, preservamos dados não enviados ou buscamos do banco se necessário
-        if (atividade.getAluno() != null && atividade.getAluno().getId() != null) {
-            Usuario aluno = usuarioRepository.findById(atividade.getAluno().getId()).orElse(null);
-            atividade.setAluno(aluno);
+    public ResponseEntity<?> salvarAtividade(@RequestBody AtividadeRequest req) {
+        Atividade atividade;
+
+        // Edição ou Criação
+        if (req.id != null) {
+            atividade = atividadeRepository.findById(req.id).orElse(new Atividade());
         } else {
-            atividade.setAluno(null);
+            atividade = new Atividade();
         }
+
+        // Atualiza campos
+        atividade.setTipo(req.tipo);
+        atividade.setConteudo(req.conteudo);
         
-        // Garante data se não vier
-        if (atividade.getDataRealizacao() == null) {
+        // Garante a data
+        if (req.dataRealizacao != null) {
+            atividade.setDataRealizacao(req.dataRealizacao);
+        } else if (atividade.getDataRealizacao() == null) {
             atividade.setDataRealizacao(LocalDateTime.now());
+        }
+
+        // Vincula o Aluno (Correção do erro 500)
+        if (req.aluno != null && req.aluno.getId() != null) {
+            Usuario aluno = usuarioRepository.findById(req.aluno.getId()).orElse(null);
+            if (aluno == null) return ResponseEntity.badRequest().body("Aluno não encontrado");
+            atividade.setAluno(aluno);
+        } else if (atividade.getAluno() == null) {
+             return ResponseEntity.badRequest().body("É obrigatório informar um aluno.");
         }
 
         atividadeRepository.save(atividade);
