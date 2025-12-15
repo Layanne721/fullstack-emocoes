@@ -4,45 +4,44 @@ services:
   app:
     container_name: cantinho_backend
     image: cantinho_backend:latest
-    # Adicionar contexto de build explícito
     build: 
       context: ./BACKEND-CANTINHO_EMOCOES
       dockerfile: Dockerfile
-    ports:
-      # Mapeia para localhost apenas, pois o Nginx fará o proxy
-      - "127.0.0.1:8080:8080"
+    # Não expomos a porta 8080 para fora (segurança), pois o Nginx interno (web) fará o proxy.
+    # Se precisar testar direto sem passar pelo frontend, descomente a linha abaixo.
+    # ports:
+    #   - "8080:8080"
     environment:
-      # Sobrescreve a porta do Spring Boot para 8080
       - PORT=8080
-      # Configurações para o banco de dados interno
+      # Usa o nome do serviço do banco de dados definido abaixo (db)
       - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/cantinho_db
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=minhasenha123 
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
-      # URL do Frontend para e-mails e CORS (HTTPS e sem porta)
       - FRONTEND_URL=https://cantinhodosaber.online
     depends_on:
       - db
     networks:
       - cantinho-network
+    restart: always
 
   web:
     container_name: cantinho_frontend
     image: cantinho_frontend:latest
-    # Serviço de frontend (Vue/Vite + Nginx)
     build:
       context: ./FRONTEND-CANTINHO_EMOCOES
       dockerfile: Dockerfile
       args:
-        # A URL da API agora é o próprio domínio com HTTPS (o Nginx redireciona /api)
+        # A URL pública da API
         VITE_API_URL: https://cantinhodosaber.online
     ports:
-      # Mudamos para 3000 para liberar a porta 80 para o Nginx da VPS
+      # Mapeia a porta 3000 do VPS para a porta 80 do container Nginx
       - "3000:80"
     depends_on:
       - app
     networks:
       - cantinho-network
+    restart: always
 
   db:
     container_name: cantinho_db
