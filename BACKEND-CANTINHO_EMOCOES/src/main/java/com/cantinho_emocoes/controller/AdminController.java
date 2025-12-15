@@ -45,16 +45,19 @@ public class AdminController {
         ));
     }
 
-    // --- DTOs PARA EVITAR LOOPS INFINITOS ---
+    // --- DTOs (Ajustados para o modelo real de Atividade) ---
     public record UsuarioSimplesDTO(Long id, String nome, String email, String perfil, String responsavelNome) {}
-    public record AtividadeDTO(Long id, String titulo, String descricao, Long alunoId, String alunoNome) {}
+    
+    // CORREÇÃO: Usando tipo, conteudo e dataRealizacao em vez de titulo/descricao
+    public record AtividadeDTO(Long id, String tipo, String conteudo, LocalDateTime dataRealizacao, Long alunoId, String alunoNome) {}
+    
     public record DiarioDTO(Long id, String emocao, int intensidade, String relato, LocalDateTime dataRegistro, Long alunoId, String alunoNome) {}
 
     // --- USUÁRIOS ---
     @GetMapping("/usuarios")
     public ResponseEntity<List<UsuarioSimplesDTO>> listarUsuarios() {
         List<UsuarioSimplesDTO> lista = usuarioRepository.findAll().stream()
-            .filter(u -> u.getResponsavel() == null) // Apenas Pais/Admins
+            .filter(u -> u.getResponsavel() == null)
             .map(u -> new UsuarioSimplesDTO(u.getId(), u.getNome(), u.getEmail(), u.getPerfil().name(), null))
             .collect(Collectors.toList());
         return ResponseEntity.ok(lista);
@@ -100,17 +103,21 @@ public class AdminController {
     @GetMapping("/alunos")
     public ResponseEntity<List<UsuarioSimplesDTO>> listarAlunos() {
         List<UsuarioSimplesDTO> lista = usuarioRepository.findAll().stream()
-            .filter(u -> u.getResponsavel() != null) // Apenas Alunos
+            .filter(u -> u.getResponsavel() != null)
             .map(u -> new UsuarioSimplesDTO(u.getId(), u.getNome(), null, "CRIANCA", u.getResponsavel().getNome()))
             .collect(Collectors.toList());
         return ResponseEntity.ok(lista);
     }
 
-    // --- ATIVIDADES ---
+    // --- ATIVIDADES (CORRIGIDO) ---
     @GetMapping("/atividades")
     public ResponseEntity<List<AtividadeDTO>> listarAtividades() {
         List<AtividadeDTO> lista = atividadeRepository.findAll().stream()
-            .map(a -> new AtividadeDTO(a.getId(), a.getTitulo(), a.getDescricao(), 
+            .map(a -> new AtividadeDTO(
+                a.getId(), 
+                a.getTipo(),      // Agora usa getTipo()
+                a.getConteudo(),  // Agora usa getConteudo()
+                a.getDataRealizacao(), // Adicionado Data
                 a.getAluno() != null ? a.getAluno().getId() : null,
                 a.getAluno() != null ? a.getAluno().getNome() : "Geral"))
             .collect(Collectors.toList());
@@ -119,12 +126,19 @@ public class AdminController {
 
     @PostMapping("/atividades")
     public ResponseEntity<?> salvarAtividade(@RequestBody Atividade atividade) {
+        // Se for edição, preservamos dados não enviados ou buscamos do banco se necessário
         if (atividade.getAluno() != null && atividade.getAluno().getId() != null) {
             Usuario aluno = usuarioRepository.findById(atividade.getAluno().getId()).orElse(null);
             atividade.setAluno(aluno);
         } else {
             atividade.setAluno(null);
         }
+        
+        // Garante data se não vier
+        if (atividade.getDataRealizacao() == null) {
+            atividade.setDataRealizacao(LocalDateTime.now());
+        }
+
         atividadeRepository.save(atividade);
         return ResponseEntity.ok(Map.of("message", "Atividade salva!"));
     }
@@ -135,7 +149,7 @@ public class AdminController {
         return ResponseEntity.ok(Map.of("message", "Excluída!"));
     }
 
-    // --- DIÁRIOS (Nova Funcionalidade) ---
+    // --- DIÁRIOS ---
     @GetMapping("/diarios")
     public ResponseEntity<List<DiarioDTO>> listarDiarios() {
         List<DiarioDTO> lista = diarioRepository.findAll().stream()
@@ -155,7 +169,7 @@ public class AdminController {
         if (req.emocao != null) d.setEmocao(req.emocao);
         if (req.intensidade != null) d.setIntensidade(req.intensidade);
         if (req.relato != null) d.setRelato(req.relato);
-        if (req.dataRegistro != null) d.setDataRegistro(req.dataRegistro); // Permite mudar a data!
+        if (req.dataRegistro != null) d.setDataRegistro(req.dataRegistro);
 
         diarioRepository.save(d);
         return ResponseEntity.ok(Map.of("message", "Diário atualizado!"));
