@@ -292,7 +292,7 @@ async function registrar() {
         </div>
         
         <div class="p-8 overflow-y-auto text-gray-600 text-sm leading-relaxed space-y-4 font-nunito font-bold">
-          <h4 class="font-black text-[#A78BFA]">1. Sobre o Cantinho das Emoções</h4>
+          <h4 class="font-black text-[#A78BFA]">1. Sobre o Cantinho do Saber</h4>
           <p>Este aplicativo tem fins educativos para auxiliar no monitoramento emocional dos alunos. Os dados são acessíveis pelo professor responsável.</p>
           
           <h4 class="font-black text-[#A78BFA]">2. Privacidade dos Dados</h4>

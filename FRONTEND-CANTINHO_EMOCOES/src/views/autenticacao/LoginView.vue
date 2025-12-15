@@ -103,7 +103,7 @@ async function fazerLogin() {
           <span>🩷</span> Bem-vindo ao <span>🩷</span>
         </p>
         <h1 class="text-3xl md:text-4xl font-extrabold text-[#C084FC] drop-shadow-sm" style="font-family: 'Nunito', sans-serif;">
-          Cantinho das <br /> Emoções
+          Cantinho do <br /> Saber
         </h1>
         <p class="text-gray-400 text-xs mt-2 font-bold">Portal do Professor e Aluno 🎓</p>
 

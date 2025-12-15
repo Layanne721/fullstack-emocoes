@@ -193,7 +193,7 @@ function logout() {
       <header class="bg-white rounded-[30px] p-6 shadow-sm border-2 border-white mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
           <h1 class="text-2xl font-black text-gray-700">Olá, {{ authStore.user?.nome }}</h1>
-          <p class="text-sm text-gray-400 font-bold">Gerencie o Cantinho das Emoções</p>
+          <p class="text-sm text-gray-400 font-bold">Gerencie o Cantinho do Saber</p>
         </div>
         
         <div class="flex items-center gap-3">

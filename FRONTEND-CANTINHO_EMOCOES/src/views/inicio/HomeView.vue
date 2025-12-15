@@ -131,7 +131,7 @@ async function atualizarAvatar(novoAvatar) {
     <header class="pt-8 px-6 text-center relative z-10 w-full max-w-4xl">
       <div class="flex items-center justify-center gap-2 mb-2">
         <span class="text-2xl md:text-3xl">🩷</span>
-        <h1 class="text-3xl md:text-4xl font-extrabold text-[#C084FC] drop-shadow-sm leading-tight">Cantinho das<br>Emoções</h1>
+        <h1 class="text-3xl md:text-4xl font-extrabold text-[#C084FC] drop-shadow-sm leading-tight">Cantinho do<br>Saber</h1>
         <span class="text-2xl md:text-3xl">🩷</span>
       </div>
       <p class="text-gray-400 font-bold text-sm md:text-lg tracking-wide">Olá, {{ nome }}! 💜</p>
