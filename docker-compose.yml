@@ -20,7 +20,7 @@ services:
       - SPRING_DATASOURCE_PASSWORD=minhasenha123 
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       # URL do Frontend para e-mails e CORS (HTTPS e sem porta)
-      - FRONTEND_URL=https://cantinhoemocoes.shop
+      - FRONTEND_URL=https://cantinhodosaber.online
     depends_on:
       - db
     networks:
@@ -35,7 +35,7 @@ services:
       dockerfile: Dockerfile
       args:
         # A URL da API agora é o próprio domínio com HTTPS (o Nginx redireciona /api)
-        VITE_API_URL: https://cantinhoemocoes.shop
+        VITE_API_URL: https://cantinhodosaber.online
     ports:
       # Mudamos para 3000 para liberar a porta 80 para o Nginx da VPS
       - "3000:80"
