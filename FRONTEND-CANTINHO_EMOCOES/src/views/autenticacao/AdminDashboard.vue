@@ -297,7 +297,7 @@ function logout() {
           </div>
           <div class="bg-white p-8 rounded-[30px] shadow-sm border border-orange-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
              <div class="absolute -right-4 -top-4 w-24 h-24 bg-orange-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
-             <p class="text-xs font-black text-orange-400 uppercase tracking-wider relative z-10">Atividades Criadas</p>
+             <p class="text-xs font-black text-orange-400 uppercase tracking-wider relative z-10">Atividades Realizadas</p>
              <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalAtividades || 0 }}</p>
           </div>
         </div>

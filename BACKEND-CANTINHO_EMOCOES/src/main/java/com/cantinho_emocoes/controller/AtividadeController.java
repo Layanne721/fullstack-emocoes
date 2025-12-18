@@ -99,7 +99,7 @@ public class AtividadeController {
         return ResponseEntity.ok(Map.of("tipo", t.getTipo(), "conteudo", t.getConteudo()));
     }
 
-    // --- CÁLCULO DE PENDÊNCIAS (CORRIGIDO PARA LIVRE) ---
+    // --- CÁLCULO DE PENDÊNCIAS (CORRIGIDO PARA LIVRE E CASE SENSITIVE) ---
     @GetMapping("/pendentes")
     public ResponseEntity<?> getTarefasPendentes(@RequestHeader("x-child-id") Long childId) {
         // Busca tarefas e atividades
@@ -110,13 +110,13 @@ public class AtividadeController {
         Map<String, Long> contagemFeitas = atividadesFeitas.stream()
             .collect(Collectors.groupingBy(
                 a -> {
+                    String tipo = a.getTipo() == null ? "" : a.getTipo().trim().toUpperCase();
                     // CORREÇÃO: Se for LIVRE, ignoramos o conteúdo para criar uma chave genérica.
-                    // Isso permite que a Tarefa LIVRE (sem conteúdo) bata com a Atividade LIVRE (com desenho).
-                    if ("LIVRE".equalsIgnoreCase(a.getTipo())) {
+                    if ("LIVRE".equals(tipo)) {
                         return "LIVRE|GENERICO";
                     }
                     String c = a.getConteudo() == null ? "" : a.getConteudo().trim().toUpperCase();
-                    return a.getTipo() + "|" + c;
+                    return tipo + "|" + c;
                 },
                 Collectors.counting()
             ));
@@ -126,13 +126,14 @@ public class AtividadeController {
         // Abate as feitas das atribuídas
         for (Tarefa tarefa : tarefasAtribuidas) {
             String chave;
+            String tipoTarefa = tarefa.getTipo() == null ? "" : tarefa.getTipo().trim().toUpperCase();
             
             // CORREÇÃO: Gerar a mesma chave genérica para a tarefa LIVRE
-            if ("LIVRE".equalsIgnoreCase(tarefa.getTipo())) {
+            if ("LIVRE".equals(tipoTarefa)) {
                 chave = "LIVRE|GENERICO";
             } else {
                 String conteudo = tarefa.getConteudo() == null ? "" : tarefa.getConteudo().trim().toUpperCase();
-                chave = tarefa.getTipo() + "|" + conteudo;
+                chave = tipoTarefa + "|" + conteudo;
             }
             
             if (contagemFeitas.containsKey(chave) && contagemFeitas.get(chave) > 0) {
