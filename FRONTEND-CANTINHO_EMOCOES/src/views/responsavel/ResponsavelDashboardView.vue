@@ -127,7 +127,7 @@ const salvandoDiario = ref(false);
 // Dashboard
 const filtroTempo = ref('semana');
 const dadosDashboard = ref(null);
-const registrosDiario = ref([]); // <--- CORREÇÃO: Variável que faltava
+const registrosDiario = ref([]); 
 const listaAtividades = ref([]);
 const carregandoDados = ref(false);
 const carregandoGeral = ref(false);
@@ -159,6 +159,18 @@ const showTeacherModal = ref(false);
 const professorForm = ref({ nome: authStore.user?.name || '', avatarUrl: authStore.user?.avatarUrl || '' });
 const salvandoProfessor = ref(false);
 
+// --- FUNÇÃO DE AJUDA PARA DATAS (CORREÇÃO) ---
+function parseData(data) {
+    if (!data) return new Date();
+    // Verifica se é array do Java [ano, mes, dia, hora, min, seg]
+    // Nota: O mês no JS é 0-indexado, mas no Java é 1-indexado
+    if (Array.isArray(data)) {
+        return new Date(data[0], data[1] - 1, data[2], data[3] || 0, data[4] || 0, data[5] || 0);
+    }
+    // Caso seja String ISO
+    return new Date(data);
+}
+
 // --- COMPUTEDS ---
 const alunosFiltrados = computed(() => {
     if (!termoBusca.value) return dadosTurma.value;
@@ -166,16 +178,19 @@ const alunosFiltrados = computed(() => {
     return dadosTurma.value.filter(aluno => aluno.nome.toLowerCase().includes(termo));
 });
 
-// Mantemos o filtro AQUI apenas para visualização na lista "Tarefas da Escola", 
-// mas o cálculo geral de rendimento é feito na função carregarDadosGeraisTurma (sem filtro).
 const atividadesEscolares = computed(() => {
     if (!listaAtividades.value) return [];
-    return listaAtividades.value.filter(a => a.tipo !== 'LIVRE').sort((a, b) => new Date(b.dataRealizacao) - new Date(a.dataRealizacao));
+    // Usa parseData para garantir a ordenação correta
+    return listaAtividades.value
+        .filter(a => a.tipo !== 'LIVRE')
+        .sort((a, b) => parseData(b.dataRealizacao) - parseData(a.dataRealizacao));
 });
 
 const galeriaLivre = computed(() => {
     if (!listaAtividades.value) return [];
-    return listaAtividades.value.filter(a => a.tipo === 'LIVRE');
+    return listaAtividades.value
+        .filter(a => a.tipo === 'LIVRE')
+        .sort((a, b) => parseData(b.dataRealizacao) - parseData(a.dataRealizacao));
 });
 
 const questoesDisponiveis = computed(() => {
@@ -239,28 +254,19 @@ async function buscarTotalAtribuicoesGlobal() {
     }
 }
 
-// --- CORREÇÃO AQUI ---
-// Removemos o filtro que ignorava 'LIVRE' na contagem de atividades feitas.
-// Agora conta tudo (entregues = atividadesRealizadas.length).
 async function carregarDadosGeraisTurma() {
     carregandoGeral.value = true;
     dadosTurma.value = [];
     try {
         const promises = dependentes.value.map(async (aluno) => {
             try {
-                // Busca total de atribuições (O backend já inclui as tarefas do tipo LIVRE neste total)
                 const totalAtribuidasRes = await api.get(`/api/atividades/total-atribuidas/${aluno.id}`);
                 const totalAtribuidas = totalAtribuidasRes.data.total || 0;
                 
-                // Busca atividades realizadas (Todas: VOGAL, NUMERO e LIVRE)
                 const ativRes = await api.get(`/api/atividades/aluno/${aluno.id}`);
                 const atividadesRealizadas = ativRes.data; 
                 
-                // --- FIX: CONTAR TUDO ---
-                // Antes: const entregues = atividadesRealizadas.filter(a => a.tipo !== 'LIVRE').length;
                 const entregues = atividadesRealizadas.length;
-                
-                // Calcula pendentes
                 const pendentes = Math.max(0, totalAtribuidas - entregues); 
 
                 return {
@@ -287,7 +293,6 @@ async function carregarDadosAluno(id) {
     try {
         const dashRes = await api.get(`/api/responsavel/dependentes/${id}/dashboard`);
         dadosDashboard.value = dashRes.data;
-        // --- CORREÇÃO: Populando a variável que faltava ---
         registrosDiario.value = dashRes.data.ultimosRegistros || []; 
         
         const ativRes = await api.get(`/api/atividades/aluno/${id}`);
@@ -505,19 +510,26 @@ const chartDataTurma = computed(() => {
 
 const chartOptionsTurma = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: true, grid: { display: false } }, y: { beginAtZero: true, stacked: true } } };
 
+// --- CORREÇÃO DO GRÁFICO DE ATIVIDADES ---
 const chartDataAtividades = computed(() => {
     const atividadesPorData = {};
     const dias = [];
     const hoje = new Date();
+    // Gera as chaves dos últimos 7 dias
     for (let i = 6; i >= 0; i--) {
         const d = new Date(); d.setDate(hoje.getDate() - i);
         const key = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
         atividadesPorData[key] = 0; dias.push(key);
     }
+    
     if (listaAtividades.value) {
         listaAtividades.value.forEach(ativ => {
-            const d = new Date(ativ.dataRealizacao).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-            if (atividadesPorData[d] !== undefined) atividadesPorData[d]++;
+            // Usa parseData para garantir leitura correta de array ou string
+            const dataObj = parseData(ativ.dataRealizacao);
+            if (!isNaN(dataObj)) {
+                const d = dataObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                if (atividadesPorData[d] !== undefined) atividadesPorData[d]++;
+            }
         });
     }
     return {
@@ -532,19 +544,19 @@ const chartDataEmocoes = computed(() => {
     const emotionValues = registros.map(r => emotionValueMap[r.emocao] || 4); 
     const pointEmojis = registros.map(r => emojiMap[r.emocao] || '😐');
     return {
-        labels: registros.map(r => new Date(r.dataRegistro).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'})),
+        labels: registros.map(r => parseData(r.dataRegistro).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'})),
         datasets: [{ label: 'Estado Emocional', data: emotionValues, borderColor: '#8B5CF6', backgroundColor: 'rgba(139, 92, 246, 0.1)', fill: true, tension: 0.4, pointRadius: 6, pointHoverRadius: 8, pointBackgroundColor: '#FFF', pointBorderColor: '#8B5CF6', pointBorderWidth: 2, pointEmojis: pointEmojis }]
     };
 });
 
 const chartOptionsEmocoes = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 7, grid: { display: true, borderDash: [5, 5] }, ticks: { callback: function(value) { return valueEmotionLabel[value] || ''; } } }, x: { grid: { display: false } } } };
-const chartOptionsCommon = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { display: false } }, x: { grid: { display: false } } } };
+const chartOptionsCommon = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { display: false }, ticks: { stepSize: 1 } }, x: { grid: { display: false } } } };
 
 // SUGESTÃO PEDAGÓGICA (Adicionado da V1)
 const sugestaoPedagogica = computed(() => {
     const registros = dadosDashboard.value?.historicoGrafico || [];
     if (registros.length === 0) return null;
-    const registrosOrdenados = [...registros].sort((a, b) => new Date(b.dataRegistro) - new Date(a.dataRegistro));
+    const registrosOrdenados = [...registros].sort((a, b) => parseData(b.dataRegistro) - parseData(a.dataRegistro));
     const ultimaEmocao = registrosOrdenados[0].emocao;
     
     const mapaSugestoes = {
@@ -630,7 +642,8 @@ async function enviarAtividade() {
 }
 
 function imprimirRelatorio() { window.print(); }
-function formatarData(data) { return new Date(data).toLocaleString('pt-BR'); }
+// Atualizado para usar parseData
+function formatarData(data) { return parseData(data).toLocaleString('pt-BR'); }
 
 watch([subTabAvaliacao, abaAlunoAtual], async () => {
     if (alunoSelecionado.value && abaAlunoAtual.value === 'avaliacao') {
