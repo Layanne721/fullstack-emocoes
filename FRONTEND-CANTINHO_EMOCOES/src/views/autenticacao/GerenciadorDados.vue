@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import api from '@/services/api';
 import { 
   Users, GraduationCap, LogOut, Search, Plus, Edit2, Trash2, X, Save, 
-  ArrowLeft, BookOpen, Database, Calendar, Filter, Eraser, UserCheck
+  ArrowLeft, BookOpen, Database, Calendar, Filter, UserCheck, ArrowUpDown
 } from 'lucide-vue-next';
 
 const router = useRouter();
@@ -15,23 +15,21 @@ const authStore = useAuthStore();
 const loading = ref(false);
 const termoPesquisa = ref('');
 const listaPais = ref([]); // Lista de Professores (Responsáveis)
-const dados = ref([]); // Lista da tabela principal (Usuários ou Todos os Alunos)
+const dados = ref([]); // Lista da tabela principal
 
 // Controle de Navegação
 const viewMode = ref('lista'); 
 const activeTab = ref('usuarios'); 
 const subTab = ref('atividades'); 
 
-// Controle de Navegação da Turma (NOVO)
-const estagioAlunos = ref('selecao-prof'); // 'selecao-prof' ou 'lista-alunos'
+// Controle de Navegação da Turma
+const estagioAlunos = ref('selecao-prof'); 
 const professorSelecionado = ref(null);
 
-// Filtros do Histórico
+// FILTROS SIMPLIFICADOS (NOVO)
 const filtrosHist = ref({
-    dataInicio: '',
-    dataFim: '',
-    tipo: '',
-    conteudo: ''
+    ordem: 'desc', // 'desc' (Mais recente) ou 'asc' (Mais antigo)
+    tipoAtividade: '' // Apenas para Jogos
 });
 
 // Aluno selecionado para visualização de histórico
@@ -43,9 +41,8 @@ const historicoDiarios = ref([]);
 const modalFormAberto = ref(false);
 const itemEmEdicao = ref({});
 
-// Listas para Selects de Filtro
+// Lista de Tipos de Atividade
 const tiposAtividade = ['VOGAL', 'CONSOANTE', 'NUMERO', 'FORMA', 'EMOCAO', 'FRUTA', 'LIVRE', 'OUTRO'];
-const tiposEmocao = ['FELIZ', 'TRISTE', 'BRAVO', 'MEDO', 'ANSIOSO', 'CALMO', 'NOJINHO'];
 
 // Configuração das Abas Principais
 const configAbas = {
@@ -60,16 +57,17 @@ onMounted(async () => {
 
 watch(activeTab, () => {
   viewMode.value = 'lista';
-  estagioAlunos.value = 'selecao-prof'; // Reseta para lista de professores ao trocar aba
+  estagioAlunos.value = 'selecao-prof'; 
   professorSelecionado.value = null;
   termoPesquisa.value = '';
   dados.value = [];
   carregarDadosPrincipais();
 });
 
-// Limpa filtros ao trocar de aba no histórico
+// Reseta filtros ao trocar de aba no histórico
 watch(subTab, () => {
-    limparFiltrosHistorico();
+    filtrosHist.value.tipoAtividade = '';
+    filtrosHist.value.ordem = 'desc';
 });
 
 // --- CARREGAMENTO DE DADOS ---
@@ -90,23 +88,19 @@ async function carregarDadosPrincipais() {
 async function carregarListaPais() {
     try {
         const res = await api.get('/api/admin/usuarios');
-        listaPais.value = res.data; // Aqui vêm os professores
+        listaPais.value = res.data; 
     } catch (e) {}
 }
 
-// --- FILTROS INTELIGENTES ---
+// --- FILTROS TABELA PRINCIPAL ---
 
-// Filtra os dados da tabela principal
 const dadosFiltrados = computed(() => {
   let listaBase = dados.value;
 
-  // Se estiver na aba Alunos e já selecionou um professor, filtra só os alunos dele
   if (activeTab.value === 'alunos') {
       if (estagioAlunos.value === 'selecao-prof') {
-          // Na seleção de prof, a lista base são os Pais/Professores
           listaBase = listaPais.value; 
       } else if (professorSelecionado.value) {
-          // Na lista de alunos, filtra pelo nome do responsável
           listaBase = dados.value.filter(aluno => 
               aluno.responsavelNome === professorSelecionado.value.nome
           );
@@ -118,52 +112,54 @@ const dadosFiltrados = computed(() => {
   return listaBase.filter(item => JSON.stringify(item).toLowerCase().includes(termo));
 });
 
-// Filtros do Histórico (Mantidos)
+// --- FILTROS DE HISTÓRICO (CORRIGIDO E SIMPLIFICADO) ---
+
 const historicoJogosFiltrados = computed(() => {
-    return historicoJogos.value.filter(item => {
-        const dataItem = parseDataSimples(item.dataRealizacao);
-        const dataIni = filtrosHist.value.dataInicio ? new Date(filtrosHist.value.dataInicio + 'T00:00:00') : null;
-        const dataFim = filtrosHist.value.dataFim ? new Date(filtrosHist.value.dataFim + 'T23:59:59') : null;
+    let lista = [...historicoJogos.value];
 
-        if (dataIni && dataItem < dataIni) return false;
-        if (dataFim && dataItem > dataFim) return false;
-        if (filtrosHist.value.tipo && item.tipo !== filtrosHist.value.tipo) return false;
-        if (filtrosHist.value.conteudo && !String(item.conteudo).toLowerCase().includes(filtrosHist.value.conteudo.toLowerCase())) return false;
+    // 1. Filtro de Tipo (Apenas se selecionado)
+    if (filtrosHist.value.tipoAtividade) {
+        lista = lista.filter(item => item.tipo === filtrosHist.value.tipoAtividade);
+    }
 
-        return true;
+    // 2. Ordenação por Data
+    lista.sort((a, b) => {
+        const dataA = parseDataSimples(a.dataRealizacao);
+        const dataB = parseDataSimples(b.dataRealizacao);
+        return filtrosHist.value.ordem === 'asc' ? dataA - dataB : dataB - dataA;
     });
+
+    return lista;
 });
 
 const historicoDiariosFiltrados = computed(() => {
-    return historicoDiarios.value.filter(item => {
-        const dataItem = parseDataSimples(item.dataRegistro);
-        const dataIni = filtrosHist.value.dataInicio ? new Date(filtrosHist.value.dataInicio + 'T00:00:00') : null;
-        const dataFim = filtrosHist.value.dataFim ? new Date(filtrosHist.value.dataFim + 'T23:59:59') : null;
+    let lista = [...historicoDiarios.value];
 
-        if (dataIni && dataItem < dataIni) return false;
-        if (dataFim && dataItem > dataFim) return false;
-        if (filtrosHist.value.tipo && item.emocao !== filtrosHist.value.tipo) return false;
-        if (filtrosHist.value.conteudo && !String(item.relato).toLowerCase().includes(filtrosHist.value.conteudo.toLowerCase())) return false;
-
-        return true;
+    // Diário NÃO tem filtro de tipo aqui, apenas ordenação
+    
+    // 1. Ordenação por Data
+    lista.sort((a, b) => {
+        const dataA = parseDataSimples(a.dataRegistro);
+        const dataB = parseDataSimples(b.dataRegistro);
+        return filtrosHist.value.ordem === 'asc' ? dataA - dataB : dataB - dataA;
     });
+
+    return lista;
 });
 
-function limparFiltrosHistorico() {
-    filtrosHist.value = { dataInicio: '', dataFim: '', tipo: '', conteudo: '' };
-}
-
 function parseDataSimples(data) {
+    if (!data) return new Date(0);
+    // Array Java: [ano, mes, dia, hora, min] -> Mês no JS é 0-indexado
     if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0);
     return new Date(data);
 }
 
-// --- NAVEGAÇÃO ENTRE PROFESSOR E TURMA ---
+// --- NAVEGAÇÃO ---
 
 function selecionarProfessor(prof) {
     professorSelecionado.value = prof;
     estagioAlunos.value = 'lista-alunos';
-    termoPesquisa.value = ''; // Limpa busca ao entrar na turma
+    termoPesquisa.value = ''; 
 }
 
 function voltarParaSelecaoProf() {
@@ -172,13 +168,11 @@ function voltarParaSelecaoProf() {
     termoPesquisa.value = '';
 }
 
-// --- LÓGICA DO HISTÓRICO DO ALUNO ---
-
 async function abrirHistoricoAluno(aluno) {
     alunoSelecionado.value = aluno;
     viewMode.value = 'historico';
     subTab.value = 'atividades';
-    limparFiltrosHistorico();
+    filtrosHist.value = { ordem: 'desc', tipoAtividade: '' };
     await carregarHistorico();
 }
 
@@ -231,12 +225,11 @@ function formatarParaInput(data) {
     return '';
 }
 
-// --- MODAIS DE EDIÇÃO ---
+// --- MODAIS ---
 
 function abrirModalNovoPrincipal() {
     itemEmEdicao.value = {};
     if (activeTab.value === 'alunos') {
-        // Se já estiver dentro de uma turma, pré-seleciona o professor
         if (professorSelecionado.value) {
             itemEmEdicao.value = { responsavel: { id: professorSelecionado.value.id } };
         } else {
@@ -248,9 +241,7 @@ function abrirModalNovoPrincipal() {
 
 function abrirModalEditarPrincipal(item) {
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
-    // Garante estrutura do objeto responsável
     if (activeTab.value === 'alunos' && !itemEmEdicao.value.responsavel) {
-        // Tenta achar pelo nome se o objeto não veio completo
         const prof = listaPais.value.find(p => p.nome === item.responsavelNome);
         itemEmEdicao.value.responsavel = { id: prof ? prof.id : '' };
     }
@@ -316,11 +307,8 @@ async function salvar() {
         alert('Salvo com sucesso!');
         modalFormAberto.value = false;
 
-        // Atualiza a lista correta
         if (viewMode.value === 'lista') {
             await carregarDadosPrincipais();
-            // Se salvou um aluno, precisamos atualizar a lista de alunos (dados)
-            // Se salvou um professor, atualiza listaPais
             if (activeTab.value === 'usuarios') await carregarListaPais();
         } else {
             await carregarHistorico();
@@ -344,7 +332,6 @@ async function excluir(id) {
         
         if (viewMode.value === 'lista') {
             dados.value = dados.value.filter(i => i.id !== id);
-            // Se deletou um professor, remove da lista de pais também
             if (activeTab.value === 'usuarios') {
                 listaPais.value = listaPais.value.filter(i => i.id !== id);
             }
@@ -507,31 +494,24 @@ function logout() {
          <div class="p-4 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-4">
              <div class="flex items-center gap-2">
                  <Filter size="16" class="text-gray-400"/>
-                 <span class="text-xs font-bold text-gray-500 uppercase">Filtros:</span>
+                 <span class="text-xs font-bold text-gray-500 uppercase">Filtros Rápidos:</span>
              </div>
              
              <div class="flex items-center gap-2">
-                 <span class="text-xs font-bold text-gray-400">De:</span>
-                 <input v-model="filtrosHist.dataInicio" type="date" class="input-filter">
-             </div>
-             <div class="flex items-center gap-2">
-                 <span class="text-xs font-bold text-gray-400">Até:</span>
-                 <input v-model="filtrosHist.dataFim" type="date" class="input-filter">
-             </div>
-
-             <div class="flex items-center gap-2">
-                 <span class="text-xs font-bold text-gray-400">Tipo:</span>
-                 <select v-model="filtrosHist.tipo" class="input-filter">
-                     <option value="">Todos</option>
-                     <option v-for="t in (subTab === 'atividades' ? tiposAtividade : tiposEmocao)" :key="t" :value="t">{{ t }}</option>
+                 <span class="text-xs font-bold text-gray-400 flex items-center gap-1"><ArrowUpDown size="14"/> Data:</span>
+                 <select v-model="filtrosHist.ordem" class="input-filter">
+                     <option value="desc">Mais Recente Primeiro</option>
+                     <option value="asc">Mais Antigo Primeiro</option>
                  </select>
              </div>
 
-             <div class="flex items-center gap-2 flex-1">
-                 <input v-model="filtrosHist.conteudo" type="text" :placeholder="subTab === 'atividades' ? 'Filtrar conteúdo...' : 'Filtrar relato...'" class="input-filter w-full">
+             <div class="flex items-center gap-2" v-if="subTab === 'atividades'">
+                 <span class="text-xs font-bold text-gray-400">Tipo:</span>
+                 <select v-model="filtrosHist.tipoAtividade" class="input-filter">
+                     <option value="">Todos</option>
+                     <option v-for="t in tiposAtividade" :key="t" :value="t">{{ t }}</option>
+                 </select>
              </div>
-
-             <button @click="limparFiltrosHistorico" class="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 text-gray-500" title="Limpar Filtros"><Eraser size="16"/></button>
          </div>
 
          <div v-if="subTab === 'atividades'">
@@ -560,7 +540,7 @@ function logout() {
                         </td>
                      </tr>
                      <tr v-if="historicoJogosFiltrados.length === 0">
-                         <td colspan="4" class="p-6 text-center text-gray-400 font-bold text-sm">Nenhum registro encontrado com esses filtros.</td>
+                         <td colspan="4" class="p-6 text-center text-gray-400 font-bold text-sm">Nenhum registro encontrado.</td>
                      </tr>
                   </tbody>
                </table>
@@ -595,7 +575,7 @@ function logout() {
                         </td>
                      </tr>
                      <tr v-if="historicoDiariosFiltrados.length === 0">
-                         <td colspan="4" class="p-6 text-center text-gray-400 font-bold text-sm">Nenhum registro encontrado com esses filtros.</td>
+                         <td colspan="4" class="p-6 text-center text-gray-400 font-bold text-sm">Nenhum registro encontrado.</td>
                      </tr>
                   </tbody>
                </table>
@@ -657,7 +637,9 @@ function logout() {
                  <template v-if="subTab === 'diarios'">
                     <div><label class="label">Emoção</label>
                        <select v-model="itemEmEdicao.emocao" class="input">
-                          <option v-for="e in tiposEmocao" :key="e" :value="e">{{ e }}</option>
+                          <option value="FELIZ">FELIZ</option><option value="TRISTE">TRISTE</option>
+                          <option value="BRAVO">BRAVO</option><option value="MEDO">MEDO</option>
+                          <option value="NOJINHO">NOJINHO</option><option value="CALMO">CALMO</option>
                        </select>
                     </div>
                     <div><label class="label">Intensidade (1-5)</label><input v-model="itemEmEdicao.intensidade" type="number" min="1" max="5" class="input"></div>
