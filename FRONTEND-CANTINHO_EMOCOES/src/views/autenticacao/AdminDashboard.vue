@@ -1,188 +1,316 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import api from '@/services/api';
-
-// Ícones (Lucide)
 import { 
-  Users, BookOpen, BarChart2, LogOut, 
-  Trash2, Search, UploadCloud, DownloadCloud, Database
+  Users, GraduationCap, LogOut, Search, Plus, Edit2, Trash2, X, Save, 
+  ArrowLeft, BookOpen, Database, Calendar
 } from 'lucide-vue-next';
 
-// --- CONFIGURAÇÃO ---
 const router = useRouter();
 const authStore = useAuthStore();
-const activeTab = ref('usuarios');
+
+// --- ESTADO GERAL ---
 const loading = ref(false);
-
-// --- DADOS ---
-const usuarios = ref([]);
-const stats = ref({});
 const termoPesquisa = ref('');
+const listaPais = ref([]); // Para criar novos alunos
+const dados = ref([]); // Lista da tabela principal
 
-// --- VARIÁVEIS DE BACKUP ---
-const fileInput = ref(null);
-const loadingBackup = ref(false);
-const loadingRestore = ref(false);
-const deletandoId = ref(null);
+// Controle de Navegação
+const viewMode = ref('lista'); 
+const activeTab = ref('usuarios'); 
+const subTab = ref('atividades'); 
+
+// Aluno selecionado para visualização de histórico
+const alunoSelecionado = ref(null); 
+const historicoJogos = ref([]);
+const historicoDiarios = ref([]);
+
+// Controle de Modais
+const modalFormAberto = ref(false);
+const itemEmEdicao = ref({});
+
+// Configuração das Abas Principais
+const configAbas = {
+  usuarios: { titulo: 'Usuários do Sistema', url: '/api/admin/usuarios', icone: Users },
+  alunos:   { titulo: 'Gerenciar Alunos',    url: '/api/admin/alunos',   icone: GraduationCap }
+};
 
 onMounted(async () => {
-  const perfil = authStore.user?.perfil;
-  if (perfil !== 'ADMIN' && perfil !== 'ADMINISTRADOR') {
-    router.push('/');
-    return;
-  }
-  await carregarDadosIniciais();
+  await carregarDadosPrincipais();
+  carregarListaPais();
 });
 
-async function carregarDadosIniciais() {
+watch(activeTab, () => {
+  viewMode.value = 'lista';
+  termoPesquisa.value = '';
+  dados.value = [];
+  carregarDadosPrincipais();
+});
+
+// --- CARREGAMENTO DE DADOS ---
+
+async function carregarDadosPrincipais() {
   loading.value = true;
   try {
-    const [usersRes, statsRes] = await Promise.all([
-      api.get('/api/admin/usuarios'),
-      api.get('/api/admin/dashboard/stats')
-    ]);
-    usuarios.value = usersRes.data;
-    stats.value = statsRes.data; 
-  } catch (error) {
-    console.error('Erro ao carregar dados:', error);
+    const url = configAbas[activeTab.value].url;
+    const res = await api.get(url);
+    dados.value = res.data;
+  } catch (e) {
+    console.error(e);
   } finally {
     loading.value = false;
   }
 }
 
-// --- BACKUP & RESTORE ---
-async function baixarBackup() {
-    loadingBackup.value = true;
+async function carregarListaPais() {
     try {
-        const response = await api.get('/api/admin/backup/download', { responseType: 'blob' });
-        const url = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement('a');
-        link.href = url;
-        const date = new Date().toISOString().slice(0, 10);
-        link.setAttribute('download', `backup_cantinho_${date}.sql`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-    } catch (e) {
-        console.error(e);
-        alert("Erro ao baixar backup.");
-    } finally {
-        loadingBackup.value = false;
-    }
+        const res = await api.get('/api/admin/usuarios');
+        listaPais.value = res.data;
+    } catch (e) {}
 }
 
-function acionarInputRestore() {
-    fileInput.value.click();
-}
-
-async function enviarRestore(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    if (!confirm(`⚠️ PERIGO: Isso substituirá TODOS os dados atuais pelo backup "${file.name}". Continuar?`)) {
-        event.target.value = '';
-        return;
-    }
-
-    loadingRestore.value = true;
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-        await api.post('/api/admin/backup/restore', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        alert("✅ Banco restaurado com sucesso! A página será recarregada.");
-        window.location.reload();
-    } catch (e) {
-        const msg = e.response?.data?.error || "Falha na restauração.";
-        alert("❌ Erro: " + msg);
-    } finally {
-        loadingRestore.value = false;
-        event.target.value = '';
-    }
-}
-
-// --- FILTROS E AÇÕES ---
-const usuariosFiltrados = computed(() => {
-  if (!termoPesquisa.value) return usuarios.value;
+// Filtro da Tabela Principal
+const dadosFiltrados = computed(() => {
+  if (!termoPesquisa.value) return dados.value;
   const termo = termoPesquisa.value.toLowerCase();
-  return usuarios.value.filter(u => 
-    u.nome.toLowerCase().includes(termo) || 
-    (u.email && u.email.toLowerCase().includes(termo))
-  );
+  return dados.value.filter(item => JSON.stringify(item).toLowerCase().includes(termo));
 });
 
-async function excluirUsuario(usuario) {
-  if (usuario.perfil === 'ADMIN' || usuario.perfil === 'ADMINISTRADOR') {
-    alert("⛔ Você não pode excluir administradores.");
-    return;
-  }
-  let mensagem = `⚠️ Excluir ${usuario.nome}?`;
-  if (usuario.dependentes?.length > 0) {
-    mensagem += `\n\nATENÇÃO: Isso excluirá também ${usuario.dependentes.length} alunos vinculados!`;
-  }
-  if (!confirm(mensagem)) return;
+// --- LÓGICA DO HISTÓRICO DO ALUNO ---
 
-  deletandoId.value = usuario.id;
-  try {
-    await api.delete(`/api/admin/usuarios/${usuario.id}`);
-    usuarios.value = usuarios.value.filter(u => u.id !== usuario.id);
-    alert('Usuário excluído!');
-  } catch (error) {
-    alert('Erro ao excluir usuário.');
-  } finally {
-    deletandoId.value = null;
-  }
+async function abrirHistoricoAluno(aluno) {
+    alunoSelecionado.value = aluno;
+    viewMode.value = 'historico';
+    subTab.value = 'atividades';
+    await carregarHistorico();
 }
 
+async function carregarHistorico() {
+    loading.value = true;
+    try {
+        const [resAtiv, resDiarios] = await Promise.all([
+            api.get('/api/admin/atividades'),
+            api.get('/api/admin/diarios')
+        ]);
+        // Filtra localmente os dados do aluno selecionado
+        historicoJogos.value = resAtiv.data.filter(a => a.alunoId === alunoSelecionado.value.id || (a.aluno && a.aluno.id === alunoSelecionado.value.id));
+        historicoDiarios.value = resDiarios.data.filter(d => d.alunoId === alunoSelecionado.value.id || (d.dependente && d.dependente.id === alunoSelecionado.value.id));
+    } catch (e) {
+        console.error("Erro ao carregar histórico", e);
+    } finally {
+        loading.value = false;
+    }
+}
+
+function voltarParaLista() {
+    viewMode.value = 'lista';
+    alunoSelecionado.value = null;
+}
+
+// --- FUNÇÕES AUXILIARES DE DATA (CRÍTICO PARA O FIX) ---
+
+// 1. Formata qualquer coisa (Array ou String) para exibir na tabela (PT-BR)
 function formatarData(data) {
-  if (!data) return '-';
-  if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2]).toLocaleDateString('pt-BR');
-  return new Date(data).toLocaleDateString('pt-BR');
+    if (!data) return '-';
+    try {
+        // Se for Array do Java: [2024, 12, 25, 14, 30]
+        if (Array.isArray(data)) {
+            return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+        }
+        // Se for String ISO: "2024-12-25T14:30:00"
+        return new Date(data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    } catch (e) {
+        return data; // Retorna original se falhar
+    }
+}
+
+// 2. Formata Array do Java para o Input HTML (yyyy-MM-ddThh:mm)
+function formatarParaInput(data) {
+    if (!data) return '';
+    // Se for Array: [2024, 12, 25, 14, 30]
+    if (Array.isArray(data)) {
+        const y = data[0];
+        const m = String(data[1]).padStart(2, '0');
+        const d = String(data[2]).padStart(2, '0');
+        const h = String(data[3] || 0).padStart(2, '0');
+        const min = String(data[4] || 0).padStart(2, '0');
+        return `${y}-${m}-${d}T${h}:${min}`;
+    }
+    // Se for String, garante que corta os segundos para caber no input
+    return String(data).slice(0, 16);
+}
+
+// --- EDIÇÃO E CRIAÇÃO ---
+
+function abrirModalNovoPrincipal() {
+    itemEmEdicao.value = {};
+    if (activeTab.value === 'alunos') {
+        itemEmEdicao.value = { responsavel: { id: '' } };
+    }
+    modalFormAberto.value = true;
+}
+
+function abrirModalEditarPrincipal(item) {
+    itemEmEdicao.value = JSON.parse(JSON.stringify(item));
+    if (activeTab.value === 'alunos' && !itemEmEdicao.value.responsavel) {
+        itemEmEdicao.value.responsavel = { id: '' };
+    }
+    modalFormAberto.value = true;
+}
+
+function abrirModalNovoHistorico() {
+    itemEmEdicao.value = { 
+        aluno: { id: alunoSelecionado.value.id }, 
+        dependente: { id: alunoSelecionado.value.id } 
+    };
+
+    // Pega data local correta para preencher o input
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    const dataLocal = now.toISOString().slice(0, 16);
+
+    if (subTab.value === 'atividades') {
+        itemEmEdicao.value.tipo = 'VOGAL';
+        itemEmEdicao.value.dataRealizacao = dataLocal;
+    } else {
+        itemEmEdicao.value.emocao = 'FELIZ';
+        itemEmEdicao.value.intensidade = 3;
+        itemEmEdicao.value.dataRegistro = dataLocal;
+    }
+    modalFormAberto.value = true;
+}
+
+function abrirModalEditarHistorico(item) {
+    itemEmEdicao.value = JSON.parse(JSON.stringify(item));
+    
+    // FIX: Converte o dado que veio do banco (Array ou String) para o formato que o Input aceita
+    if (subTab.value === 'atividades') {
+        itemEmEdicao.value.dataRealizacao = formatarParaInput(itemEmEdicao.value.dataRealizacao);
+    } else {
+        itemEmEdicao.value.dataRegistro = formatarParaInput(itemEmEdicao.value.dataRegistro);
+    }
+
+    if (!itemEmEdicao.value.aluno) itemEmEdicao.value.aluno = { id: alunoSelecionado.value.id };
+    if (!itemEmEdicao.value.dependente) itemEmEdicao.value.dependente = { id: alunoSelecionado.value.id };
+    
+    modalFormAberto.value = true;
+}
+
+async function salvar() {
+    try {
+        let url = '';
+        let payload = { ...itemEmEdicao.value };
+
+        // FIX: Adiciona os segundos (:00) se for string, para o Java aceitar como LocalDateTime
+        if (payload.dataRealizacao && typeof payload.dataRealizacao === 'string' && payload.dataRealizacao.length === 16) {
+            payload.dataRealizacao += ':00';
+        }
+        if (payload.dataRegistro && typeof payload.dataRegistro === 'string' && payload.dataRegistro.length === 16) {
+            payload.dataRegistro += ':00';
+        }
+
+        // Define a URL correta
+        if (viewMode.value === 'lista') {
+            url = configAbas[activeTab.value].url;
+        } else {
+            url = subTab.value === 'atividades' ? '/api/admin/atividades' : '/api/admin/diarios';
+            
+            // Garante o ID do aluno no payload
+            if (subTab.value === 'atividades') {
+                payload.aluno = { id: alunoSelecionado.value.id };
+            } else {
+                // Diário costuma usar o ID no path ou body, ajustando para garantir
+                payload.id = itemEmEdicao.value.id; 
+            }
+        }
+
+        await api.post(url, payload);
+        alert('Salvo com sucesso!');
+        modalFormAberto.value = false;
+
+        // Recarrega do servidor para garantir que temos o formato oficial (Array)
+        if (viewMode.value === 'lista') await carregarDadosPrincipais();
+        else await carregarHistorico();
+
+    } catch (e) {
+        alert('Erro ao salvar: ' + (e.response?.data?.error || e.message));
+        console.error(e);
+    }
+}
+
+async function excluir(id) {
+    if (!confirm('Tem certeza?')) return;
+    try {
+        let url = '';
+        if (viewMode.value === 'lista') {
+            url = configAbas[activeTab.value].url + '/' + id;
+        } else {
+            url = (subTab.value === 'atividades' ? '/api/admin/atividades/' : '/api/admin/diarios/') + id;
+        }
+        await api.delete(url);
+        
+        if (viewMode.value === 'lista') {
+            dados.value = dados.value.filter(i => i.id !== id);
+        } else {
+            // Atualiza localmente
+            if (subTab.value === 'atividades') historicoJogos.value = historicoJogos.value.filter(i => i.id !== id);
+            else historicoDiarios.value = historicoDiarios.value.filter(i => i.id !== id);
+        }
+    } catch (e) {
+        alert('Erro ao excluir.');
+    }
 }
 
 function logout() {
-  if (authStore.clearLoginData) authStore.clearLoginData();
-  else authStore.logout();
+  authStore.logout();
   router.push('/login');
 }
 </script>
 
 <template>
   <div class="min-h-screen bg-[#F0F7FF] flex font-nunito relative overflow-hidden">
-    <div class="absolute top-10 left-60 text-4xl animate-float-slow opacity-30 pointer-events-none z-0">📚</div>
-    <div class="absolute bottom-10 right-10 text-5xl animate-bounce-slow opacity-30 pointer-events-none z-0">🎓</div>
+    
+    <div class="absolute top-10 left-60 text-4xl opacity-30 pointer-events-none">⚙️</div>
+    <div class="absolute bottom-10 right-10 text-5xl opacity-30 pointer-events-none">📂</div>
 
     <aside class="w-16 md:w-64 bg-white m-2 md:m-4 rounded-[20px] md:rounded-[30px] shadow-sm border border-indigo-50 flex flex-col z-20 transition-all duration-300">
       <div class="p-4 md:p-6 flex flex-col items-center md:items-start">
-        <h2 class="text-2xl font-black text-[#4F46E5] hidden md:block tracking-tight">Admin<span class="text-orange-400">Panel</span></h2>
-        <span class="md:hidden text-2xl">🛡️</span>
+        <h2 class="text-2xl font-black text-[#4F46E5] hidden md:block">Admin<span class="text-orange-400">Dados</span></h2>
+        <span class="md:hidden text-2xl font-bold text-indigo-600">AD</span>
       </div>
       
-      <nav class="flex-1 px-2 md:px-4 space-y-3 mt-4">
-        <button @click="activeTab = 'usuarios'" :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] transition-all font-bold', activeTab === 'usuarios' ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']">
-          <Users size="22" /> <span class="hidden md:block">Usuários</span>
+      <nav class="flex-1 px-2 md:px-4 space-y-2 mt-4">
+        <button v-if="viewMode === 'historico'" @click="voltarParaLista" class="w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] bg-orange-50 text-orange-600 font-bold mb-4 shadow-sm hover:bg-orange-100 transition-colors">
+            <ArrowLeft size="20" /> <span class="hidden md:block">Voltar p/ Lista</span>
         </button>
 
-        <button @click="activeTab = 'atividades'" :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] transition-all font-bold', activeTab === 'atividades' ? 'bg-orange-50 text-orange-500 shadow-sm' : 'text-gray-400 hover:bg-gray-50']">
-          <BookOpen size="22" /> <span class="hidden md:block">Atividades</span>
-        </button>
+        <template v-if="viewMode === 'lista'">
+            <button v-for="(cfg, key) in configAbas" :key="key"
+              @click="activeTab = key" 
+              :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] font-bold transition-all', 
+               activeTab === key ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']">
+              <component :is="cfg.icone" size="20" /> <span class="hidden md:block">{{ cfg.titulo }}</span>
+            </button>
+        </template>
 
-        <button @click="activeTab = 'stats'" :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] transition-all font-bold', activeTab === 'stats' ? 'bg-green-50 text-green-600 shadow-sm' : 'text-gray-400 hover:bg-gray-50']">
-          <BarChart2 size="22" /> <span class="hidden md:block">Estatísticas</span>
-        </button>
-
-        <button @click="router.push('/admin/dados')" class="w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] transition-all font-bold text-gray-400 hover:bg-gray-50 hover:text-indigo-600">
-          <Database size="22" /> <span class="hidden md:block">Gerenciar Dados</span>
-        </button>
+        <template v-if="viewMode === 'historico'">
+            <div class="hidden md:block px-4 py-2 text-xs font-black text-gray-300 uppercase">Visão do Aluno</div>
+            
+            <button @click="subTab = 'atividades'" 
+                :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] font-bold transition-all', subTab === 'atividades' ? 'bg-green-50 text-green-600' : 'text-gray-400']">
+                <BookOpen size="20"/> <span class="hidden md:block">Jogos</span>
+            </button>
+            <button @click="subTab = 'diarios'" 
+                :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] font-bold transition-all', subTab === 'diarios' ? 'bg-blue-50 text-blue-600' : 'text-gray-400']">
+                <Database size="20"/> <span class="hidden md:block">Diários</span>
+            </button>
+        </template>
       </nav>
 
-      <div class="p-2 md:p-4 border-t border-gray-100 mb-2">
-        <button @click="logout" class="w-full flex items-center justify-center md:justify-start gap-2 px-2 md:px-4 py-3 text-red-400 hover:bg-red-50 hover:text-red-500 rounded-[20px] transition-colors font-bold">
+      <div class="p-2 md:p-4 border-t border-gray-100">
+        <button @click="logout" class="w-full flex items-center justify-center md:justify-start gap-2 px-2 md:px-4 py-3 text-red-400 hover:bg-red-50 rounded-[20px] font-bold">
           <LogOut size="20" /> <span class="hidden md:block">Sair</span>
         </button>
       </div>
@@ -192,138 +320,220 @@ function logout() {
       
       <header class="bg-white rounded-[20px] md:rounded-[30px] p-4 md:p-6 shadow-sm border-2 border-white mb-6 md:mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
         <div class="text-center md:text-left">
-          <h1 class="text-xl md:text-2xl font-black text-gray-700">Olá, {{ authStore.user?.nome }}</h1>
-          <p class="text-xs md:text-sm text-gray-400 font-bold">Gerencie o Cantinho do Saber</p>
+          <h1 class="text-xl md:text-2xl font-black text-gray-700">
+              <span v-if="viewMode === 'lista'">{{ configAbas[activeTab].titulo }}</span>
+              <span v-else>Histórico de <span class="text-indigo-600">{{ alunoSelecionado?.nome }}</span></span>
+          </h1>
+          <p class="text-xs md:text-sm text-gray-400 font-bold">
+              {{ viewMode === 'lista' ? 'Gerenciamento geral' : 'Visualizando registros individuais' }}
+          </p>
         </div>
         
-        <div class="flex items-center gap-2 md:gap-3 w-full md:w-auto justify-center">
-           <input type="file" ref="fileInput" class="hidden" accept=".sql,.dum,.dump" @change="enviarRestore">
-           
-           <button @click="baixarBackup" :disabled="loadingBackup" class="flex-1 md:flex-none px-4 py-2 bg-indigo-50 text-indigo-600 rounded-[15px] font-bold hover:bg-indigo-100 flex items-center justify-center gap-2 transition-all border border-indigo-100 text-xs md:text-sm">
-              <DownloadCloud size="18" v-if="!loadingBackup"/>
-              <span v-if="loadingBackup" class="animate-spin">⏳</span>
-              <span v-else>Backup</span>
-           </button>
-           
-           <button @click="acionarInputRestore" :disabled="loadingRestore" class="flex-1 md:flex-none px-4 py-2 bg-orange-50 text-orange-600 rounded-[15px] font-bold hover:bg-orange-100 flex items-center justify-center gap-2 transition-all border border-orange-100 text-xs md:text-sm">
-              <UploadCloud size="18" v-if="!loadingRestore"/>
-              <span v-if="loadingRestore" class="animate-spin">🔄</span>
-              <span v-else>Restaurar</span>
-           </button>
-        </div>
+        <button v-if="viewMode === 'lista'" @click="abrirModalNovoPrincipal" class="btn-primary w-full md:w-auto justify-center">
+            <Plus size="20" /> Novo {{ activeTab === 'usuarios' ? 'Usuário' : 'Aluno' }}
+        </button>
+        <button v-else @click="abrirModalNovoHistorico" class="btn-primary w-full md:w-auto justify-center">
+            <Plus size="20" /> Novo Registro
+        </button>
       </header>
 
-      <div v-if="activeTab === 'usuarios'" class="space-y-6 animate-fade-in">
-        <div class="bg-white rounded-[20px] md:rounded-[30px] shadow-sm border-2 border-white overflow-hidden min-h-[500px]">
-          
-          <div class="p-4 md:p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
-            <h3 class="font-black text-lg text-indigo-900 flex items-center gap-2">👥 Lista de Usuários</h3>
-            <div class="relative w-full md:w-1/3">
+      <div v-if="viewMode === 'lista'" class="bg-white rounded-[20px] md:rounded-[30px] shadow-sm border-2 border-white overflow-hidden min-h-[500px]">
+        <div class="p-4 md:p-6 border-b border-gray-100 flex items-center gap-4">
+            <div class="relative flex-1 max-w-md w-full">
               <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="20" />
-              <input v-model="termoPesquisa" type="text" placeholder="Buscar..." class="w-full pl-12 pr-4 py-3 bg-white rounded-[20px] border-2 border-transparent focus:border-indigo-200 outline-none font-bold text-gray-600 shadow-sm transition-all placeholder-gray-300">
+              <input v-model="termoPesquisa" type="text" placeholder="Pesquisar..." class="w-full pl-12 pr-4 py-3 bg-gray-50 rounded-[20px] outline-none font-bold text-gray-600 text-sm md:text-base">
             </div>
-          </div>
+        </div>
 
-          <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse min-w-[600px]">
-              <thead class="bg-[#F0F7FF] text-xs uppercase text-gray-400 font-extrabold tracking-wider">
-                <tr>
-                  <th class="p-3 md:p-6 rounded-tl-[30px]">Usuário</th>
-                  <th class="p-3 md:p-6">Função</th>
-                  <th class="p-3 md:p-6">Cadastro</th>
-                  <th class="p-3 md:p-6 text-right rounded-tr-[30px]">Ações</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-50">
-                <template v-for="user in usuariosFiltrados" :key="user.id">
-                  <tr class="hover:bg-[#F9FAFB] transition-colors group">
-                    <td class="p-3 md:p-6">
-                      <div class="flex items-center gap-2 md:gap-4">
-                        <div class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-br from-indigo-100 to-white flex items-center justify-center text-lg md:text-2xl shadow-sm border border-indigo-50">
-                           <span v-if="user.perfil === 'ADMIN' || user.perfil === 'ADMINISTRADOR'">🛡️</span>
-                           <span v-else>👨‍🏫</span>
-                        </div>
-                        <div>
-                          <div class="font-extrabold text-gray-700 group-hover:text-indigo-600 transition-colors text-sm md:text-base">{{ user.nome }}</div>
-                          <div class="text-[10px] md:text-xs text-gray-400 font-bold max-w-[120px] md:max-w-none truncate">{{ user.email }}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td class="p-3 md:p-6">
-                      <span :class="{'bg-purple-50 text-purple-600 border-purple-100': user.perfil === 'ADMIN' || user.perfil === 'ADMINISTRADOR', 'bg-blue-50 text-blue-600 border-blue-100': user.perfil === 'RESPONSAVEL', 'bg-green-50 text-green-600 border-green-100': user.perfil === 'DEPENDENTE'}" class="px-2 md:px-3 py-1.5 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-wide border">
-                        {{ user.perfil === 'RESPONSAVEL' ? 'PROFESSOR' : user.perfil }}
-                      </span>
-                    </td>
-                    <td class="p-3 md:p-6 text-xs md:text-sm font-bold text-gray-400">{{ formatarData(user.dataCadastro) }}</td>
-                    <td class="p-3 md:p-6 text-right">
-                      <button @click="excluirUsuario(user)" :disabled="deletandoId === user.id" class="p-2 bg-white text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-gray-100 hover:border-red-100 shadow-sm">
-                        <span v-if="deletandoId === user.id" class="animate-spin text-xs">⏳</span>
-                        <Trash2 size="18" v-else />
+        <div class="overflow-x-auto">
+          <table class="w-full text-left min-w-[600px]">
+             <thead class="bg-[#F0F7FF] text-xs uppercase text-gray-400 font-extrabold">
+               <tr>
+                  <th class="p-3 md:p-6">Nome</th>
+                  <th class="p-3 md:p-6">{{ activeTab === 'usuarios' ? 'Email / Perfil' : 'Responsável' }}</th>
+                  <th class="p-3 md:p-6 text-right">Ações</th>
+               </tr>
+             </thead>
+             <tbody class="divide-y divide-gray-50">
+                <tr v-for="item in dadosFiltrados" :key="item.id" class="hover:bg-[#F9FAFB]">
+                   <td class="p-3 md:p-6 font-bold text-gray-700 text-sm md:text-base">{{ item.nome }}</td>
+                   
+                   <td v-if="activeTab === 'usuarios'" class="p-3 md:p-6">
+                       <div class="text-xs md:text-sm text-gray-600">{{ item.email }}</div>
+                       <span class="badge-indigo">{{ item.perfil }}</span>
+                   </td>
+                   <td v-else class="p-3 md:p-6">
+                       <span class="badge-purple">{{ item.nomeResponsavel || (item.responsavel ? item.responsavel.nome : '-') }}</span>
+                   </td>
+
+                   <td class="p-3 md:p-6 text-right flex justify-end gap-2">
+                      <button v-if="activeTab === 'alunos'" @click="abrirHistoricoAluno(item)" class="px-2 md:px-3 py-2 bg-orange-100 text-orange-600 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-200 flex items-center gap-2">
+                          <Calendar size="16"/> <span class="hidden md:inline">Histórico</span>
                       </button>
-                    </td>
-                  </tr>
-                  <tr v-if="user.dependentes && user.dependentes.length > 0" class="bg-[#F8FAFC]">
-                    <td colspan="4" class="p-0">
-                      <div class="pl-16 md:pl-20 pr-4 md:pr-6 py-4 space-y-3">
-                          <div class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2"><span>↘</span> Alunos de {{ user.nome }}</div>
-                          <div v-for="aluno in user.dependentes" :key="aluno.id" class="flex items-center justify-between bg-white p-3 rounded-[20px] border border-blue-50 shadow-sm hover:shadow-md transition-all">
-                             <div class="flex items-center gap-3">
-                               <div class="w-8 h-8 rounded-full bg-green-50 text-sm flex items-center justify-center border border-green-100">🎓</div>
-                               <span class="font-bold text-gray-600 text-sm">{{ aluno.nome }}</span>
-                             </div>
-                             <span class="text-[10px] font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded-lg">{{ formatarData(aluno.dataCadastro) }}</span>
-                          </div>
-                      </div>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
-          </div>
+
+                      <button @click="abrirModalEditarPrincipal(item)" class="icon-btn text-indigo-400"><Edit2 size="18"/></button>
+                      <button @click="excluir(item.id)" class="icon-btn text-red-400"><Trash2 size="18"/></button>
+                   </td>
+                </tr>
+             </tbody>
+          </table>
         </div>
       </div>
 
-      <div v-if="activeTab === 'stats'" class="animate-fade-in">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div class="bg-white p-8 rounded-[30px] shadow-sm border border-indigo-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
-             <div class="absolute -right-4 -top-4 w-24 h-24 bg-indigo-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
-             <p class="text-xs font-black text-indigo-400 uppercase tracking-wider relative z-10">Total de Usuários</p>
-             <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalUsuarios || 0 }}</p>
-          </div>
-          <div class="bg-white p-8 rounded-[30px] shadow-sm border border-green-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
-             <div class="absolute -right-4 -top-4 w-24 h-24 bg-green-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
-             <p class="text-xs font-black text-green-500 uppercase tracking-wider relative z-10">Diários de Emoções</p>
-             <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalDiarios || 0 }}</p>
-          </div>
-          <div class="bg-white p-8 rounded-[30px] shadow-sm border border-orange-50 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300">
-             <div class="absolute -right-4 -top-4 w-24 h-24 bg-orange-50 rounded-full opacity-50 group-hover:scale-150 transition-transform"></div>
-             <p class="text-xs font-black text-orange-400 uppercase tracking-wider relative z-10">Atividades Realizadas</p>
-             <p class="text-5xl font-black text-gray-700 mt-2 relative z-10">{{ stats.totalAtividades || 0 }}</p>
-          </div>
-        </div>
-      </div>
+      <div v-else class="bg-white rounded-[20px] md:rounded-[30px] shadow-sm border-2 border-white overflow-hidden min-h-[500px]">
+         
+         <div v-if="subTab === 'atividades'">
+             <div class="p-4 md:p-6 bg-green-50/30 border-b border-green-50 flex justify-between items-center">
+                 <h3 class="font-bold text-green-700 flex items-center gap-2 text-sm md:text-base"><BookOpen size="20"/> Jogos Realizados</h3>
+                 <span class="text-xs md:text-sm font-bold text-gray-400">{{ historicoJogos.length }} registros</span>
+             </div>
+             <div class="overflow-x-auto">
+               <table class="w-full text-left min-w-[600px]">
+                  <thead class="bg-gray-50 text-xs uppercase text-gray-400 font-extrabold">
+                     <tr>
+                        <th class="p-3 md:p-6">Data</th>
+                        <th class="p-3 md:p-6">Tipo</th>
+                        <th class="p-3 md:p-6">Conteúdo</th>
+                        <th class="p-3 md:p-6 text-right">Ações</th>
+                     </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-50">
+                     <tr v-for="jogo in historicoJogos" :key="jogo.id" class="hover:bg-gray-50">
+                        <td class="p-3 md:p-6 font-bold text-gray-500 text-sm">{{ formatarData(jogo.dataRealizacao) }}</td>
+                        <td class="p-3 md:p-6 font-bold text-indigo-600 text-sm">{{ jogo.tipo }}</td>
+                        <td class="p-3 md:p-6 font-bold text-gray-700 text-sm">{{ jogo.conteudo }}</td>
+                        <td class="p-3 md:p-6 text-right flex justify-end gap-2">
+                            <button @click="abrirModalEditarHistorico(jogo)" class="icon-btn text-indigo-400"><Edit2 size="18"/></button>
+                            <button @click="excluir(jogo.id)" class="icon-btn text-red-400"><Trash2 size="18"/></button>
+                        </td>
+                     </tr>
+                  </tbody>
+               </table>
+             </div>
+         </div>
 
-      <div v-if="activeTab === 'atividades'" class="animate-fade-in">
-        <div class="bg-white rounded-[30px] p-10 text-center shadow-sm border-2 border-dashed border-gray-200">
-            <BookOpen size="48" class="mx-auto text-gray-300 mb-4" />
-            <h3 class="text-xl font-bold text-gray-400">Gerenciamento de Atividades</h3>
-            <p class="text-gray-400 text-sm mt-2">Funcionalidade em desenvolvimento...</p>
-        </div>
+         <div v-if="subTab === 'diarios'">
+             <div class="p-4 md:p-6 bg-blue-50/30 border-b border-blue-50 flex justify-between items-center">
+                 <h3 class="font-bold text-blue-700 flex items-center gap-2 text-sm md:text-base"><Database size="20"/> Registros de Emoções</h3>
+                 <span class="text-xs md:text-sm font-bold text-gray-400">{{ historicoDiarios.length }} registros</span>
+             </div>
+             <div class="overflow-x-auto">
+               <table class="w-full text-left min-w-[600px]">
+                  <thead class="bg-gray-50 text-xs uppercase text-gray-400 font-extrabold">
+                     <tr>
+                        <th class="p-3 md:p-6">Data</th>
+                        <th class="p-3 md:p-6">Emoção / Intensidade</th>
+                        <th class="p-3 md:p-6">Relato</th>
+                        <th class="p-3 md:p-6 text-right">Ações</th>
+                     </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-50">
+                     <tr v-for="diario in historicoDiarios" :key="diario.id" class="hover:bg-gray-50">
+                        <td class="p-3 md:p-6 font-bold text-gray-500 text-sm">{{ formatarData(diario.dataRegistro) }}</td>
+                        <td class="p-3 md:p-6">
+                            <span class="badge-indigo">{{ diario.emocao }} ({{ diario.intensidade }})</span>
+                        </td>
+                        <td class="p-3 md:p-6 text-sm text-gray-600 italic max-w-[200px] truncate">"{{ diario.relato }}"</td>
+                        <td class="p-3 md:p-6 text-right flex justify-end gap-2">
+                            <button @click="abrirModalEditarHistorico(diario)" class="icon-btn text-indigo-400"><Edit2 size="18"/></button>
+                            <button @click="excluir(diario.id)" class="icon-btn text-red-400"><Trash2 size="18"/></button>
+                        </td>
+                     </tr>
+                  </tbody>
+               </table>
+             </div>
+         </div>
       </div>
-
     </main>
+
+    <div v-if="modalFormAberto" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-fade-in">
+       <div class="bg-white rounded-[20px] md:rounded-[30px] shadow-2xl w-full max-w-md overflow-hidden mx-2 md:mx-0">
+          <div class="bg-indigo-600 p-4 md:p-6 flex justify-between items-center text-white">
+             <h3 class="font-black text-lg md:text-xl">
+                 {{ itemEmEdicao.id ? 'Editar' : 'Novo' }} 
+                 {{ viewMode === 'historico' ? 'Registro' : (activeTab === 'usuarios' ? 'Usuário' : 'Aluno') }}
+             </h3>
+             <button @click="modalFormAberto = false" class="hover:bg-white/20 p-2 rounded-full"><X size="20"/></button>
+          </div>
+          
+          <div class="p-6 md:p-8 space-y-4 max-h-[70vh] overflow-y-auto">
+             
+             <template v-if="viewMode === 'lista'">
+                 <template v-if="activeTab === 'usuarios'">
+                    <div><label class="label">Nome</label><input v-model="itemEmEdicao.nome" class="input"></div>
+                    <div><label class="label">Email</label><input v-model="itemEmEdicao.email" class="input"></div>
+                    <div><label class="label">Senha</label><input v-model="itemEmEdicao.senha" type="password" class="input"></div>
+                    <div><label class="label">Perfil</label>
+                       <select v-model="itemEmEdicao.perfil" class="input">
+                          <option value="RESPONSAVEL">RESPONSAVEL</option><option value="ADMINISTRADOR">ADMIN</option>
+                       </select>
+                    </div>
+                 </template>
+                 <template v-if="activeTab === 'alunos'">
+                    <div><label class="label">Nome do Aluno</label><input v-model="itemEmEdicao.nome" class="input"></div>
+                    <div><label class="label">Responsável</label>
+                       <select v-model="itemEmEdicao.responsavel.id" class="input">
+                          <option disabled value="">Selecione...</option>
+                          <option v-for="p in listaPais" :value="p.id" :key="p.id">{{ p.nome }}</option>
+                       </select>
+                    </div>
+                 </template>
+             </template>
+
+             <template v-else>
+                 <div class="p-3 bg-indigo-50 rounded-xl border border-indigo-100 mb-4">
+                     <span class="block text-xs font-bold text-indigo-400 uppercase">Aluno Vinculado</span>
+                     <span class="block font-black text-indigo-700 text-lg">{{ alunoSelecionado.nome }}</span>
+                 </div>
+
+                 <template v-if="subTab === 'atividades'">
+                    <div><label class="label">Tipo de Jogo</label>
+                        <select v-model="itemEmEdicao.tipo" class="input">
+                            <option value="VOGAL">VOGAL</option><option value="NUMERO">NUMERO</option>
+                            <option value="ALFABETO">ALFABETO</option><option value="OUTRO">OUTRO</option>
+                        </select>
+                    </div>
+                    <div><label class="label">Conteúdo</label><input v-model="itemEmEdicao.conteudo" class="input"></div>
+                    <div><label class="label">Data Realização</label><input v-model="itemEmEdicao.dataRealizacao" type="datetime-local" class="input"></div>
+                 </template>
+
+                 <template v-if="subTab === 'diarios'">
+                    <div><label class="label">Emoção</label>
+                       <select v-model="itemEmEdicao.emocao" class="input">
+                          <option value="FELIZ">FELIZ</option><option value="TRISTE">TRISTE</option>
+                          <option value="BRAVO">BRAVO</option><option value="MEDO">MEDO</option>
+                          <option value="NOJINHO">NOJINHO</option><option value="CALMO">CALMO</option>
+                       </select>
+                    </div>
+                    <div><label class="label">Intensidade (1-5)</label><input v-model="itemEmEdicao.intensidade" type="number" min="1" max="5" class="input"></div>
+                    <div><label class="label">Data Registro</label><input v-model="itemEmEdicao.dataRegistro" type="datetime-local" class="input"></div>
+                    <div><label class="label">Relato</label><textarea v-model="itemEmEdicao.relato" class="input" rows="3"></textarea></div>
+                 </template>
+             </template>
+
+          </div>
+
+          <div class="p-4 md:p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
+             <button @click="modalFormAberto = false" class="px-4 md:px-6 py-3 rounded-[15px] font-bold text-gray-500 hover:bg-gray-200 text-sm md:text-base">Cancelar</button>
+             <button @click="salvar" class="btn-primary"><Save size="18" /> Salvar</button>
+          </div>
+       </div>
+    </div>
+
   </div>
 </template>
 
 <style scoped>
 .font-nunito { font-family: 'Nunito', sans-serif; }
-@keyframes floatSlow { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-15px); } }
-.animate-float-slow { animation: floatSlow 4s ease-in-out infinite; }
-.animate-bounce-slow { animation: floatSlow 3s ease-in-out infinite; animation-delay: 1.5s; }
+.label { @apply block text-sm font-bold text-gray-500 mb-1; }
+.input { @apply w-full p-3 bg-gray-50 rounded-xl border border-gray-200 outline-none focus:border-indigo-500 font-bold text-gray-700 text-sm md:text-base; }
+.btn-primary { @apply px-4 md:px-6 py-3 bg-indigo-600 text-white rounded-[15px] font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 flex items-center gap-2 transition-all text-sm md:text-base; }
+.icon-btn { @apply p-2 rounded-lg hover:bg-gray-100 transition-colors; }
+.badge-indigo { @apply text-[10px] md:text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-md font-bold; }
+.badge-purple { @apply text-[10px] md:text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded-md font-bold; }
 .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #E0E7FF; border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: #C7D2FE; }
 </style>
