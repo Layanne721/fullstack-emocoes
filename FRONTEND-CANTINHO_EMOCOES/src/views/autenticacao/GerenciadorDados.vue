@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import api from '@/services/api';
 import { 
   Users, GraduationCap, LogOut, Search, Plus, Edit2, Trash2, X, Save, 
-  ArrowLeft, BookOpen, Database, Calendar, Filter, Eraser
+  ArrowLeft, BookOpen, Database, Calendar, Filter, Eraser, UserCheck
 } from 'lucide-vue-next';
 
 const router = useRouter();
@@ -14,15 +14,19 @@ const authStore = useAuthStore();
 // --- ESTADO GERAL ---
 const loading = ref(false);
 const termoPesquisa = ref('');
-const listaPais = ref([]); 
-const dados = ref([]); 
+const listaPais = ref([]); // Lista de Professores (Responsáveis)
+const dados = ref([]); // Lista da tabela principal (Usuários ou Todos os Alunos)
 
 // Controle de Navegação
 const viewMode = ref('lista'); 
 const activeTab = ref('usuarios'); 
 const subTab = ref('atividades'); 
 
-// Filtros do Histórico (NOVO)
+// Controle de Navegação da Turma (NOVO)
+const estagioAlunos = ref('selecao-prof'); // 'selecao-prof' ou 'lista-alunos'
+const professorSelecionado = ref(null);
+
+// Filtros do Histórico
 const filtrosHist = ref({
     dataInicio: '',
     dataFim: '',
@@ -45,8 +49,8 @@ const tiposEmocao = ['FELIZ', 'TRISTE', 'BRAVO', 'MEDO', 'ANSIOSO', 'CALMO', 'NO
 
 // Configuração das Abas Principais
 const configAbas = {
-  usuarios: { titulo: 'Usuários do Sistema', url: '/api/admin/usuarios', icone: Users },
-  alunos:   { titulo: 'Gerenciar Alunos',    url: '/api/admin/alunos',   icone: GraduationCap }
+  usuarios: { titulo: 'Equipe (Professores/Admin)', url: '/api/admin/usuarios', icone: Users },
+  alunos:   { titulo: 'Gerenciar Turmas',    url: '/api/admin/alunos',   icone: GraduationCap }
 };
 
 onMounted(async () => {
@@ -56,6 +60,8 @@ onMounted(async () => {
 
 watch(activeTab, () => {
   viewMode.value = 'lista';
+  estagioAlunos.value = 'selecao-prof'; // Reseta para lista de professores ao trocar aba
+  professorSelecionado.value = null;
   termoPesquisa.value = '';
   dados.value = [];
   carregarDadosPrincipais();
@@ -84,32 +90,44 @@ async function carregarDadosPrincipais() {
 async function carregarListaPais() {
     try {
         const res = await api.get('/api/admin/usuarios');
-        listaPais.value = res.data; // Aqui vêm os professores/responsáveis
+        listaPais.value = res.data; // Aqui vêm os professores
     } catch (e) {}
 }
 
+// --- FILTROS INTELIGENTES ---
+
+// Filtra os dados da tabela principal
 const dadosFiltrados = computed(() => {
-  if (!termoPesquisa.value) return dados.value;
+  let listaBase = dados.value;
+
+  // Se estiver na aba Alunos e já selecionou um professor, filtra só os alunos dele
+  if (activeTab.value === 'alunos') {
+      if (estagioAlunos.value === 'selecao-prof') {
+          // Na seleção de prof, a lista base são os Pais/Professores
+          listaBase = listaPais.value; 
+      } else if (professorSelecionado.value) {
+          // Na lista de alunos, filtra pelo nome do responsável
+          listaBase = dados.value.filter(aluno => 
+              aluno.responsavelNome === professorSelecionado.value.nome
+          );
+      }
+  }
+
+  if (!termoPesquisa.value) return listaBase;
   const termo = termoPesquisa.value.toLowerCase();
-  return dados.value.filter(item => JSON.stringify(item).toLowerCase().includes(termo));
+  return listaBase.filter(item => JSON.stringify(item).toLowerCase().includes(termo));
 });
 
-// --- FILTROS DE HISTÓRICO (COMPUTEDS) ---
-
+// Filtros do Histórico (Mantidos)
 const historicoJogosFiltrados = computed(() => {
     return historicoJogos.value.filter(item => {
         const dataItem = parseDataSimples(item.dataRealizacao);
         const dataIni = filtrosHist.value.dataInicio ? new Date(filtrosHist.value.dataInicio + 'T00:00:00') : null;
         const dataFim = filtrosHist.value.dataFim ? new Date(filtrosHist.value.dataFim + 'T23:59:59') : null;
 
-        // Filtro Data
         if (dataIni && dataItem < dataIni) return false;
         if (dataFim && dataItem > dataFim) return false;
-
-        // Filtro Tipo
         if (filtrosHist.value.tipo && item.tipo !== filtrosHist.value.tipo) return false;
-
-        // Filtro Conteúdo
         if (filtrosHist.value.conteudo && !String(item.conteudo).toLowerCase().includes(filtrosHist.value.conteudo.toLowerCase())) return false;
 
         return true;
@@ -122,14 +140,9 @@ const historicoDiariosFiltrados = computed(() => {
         const dataIni = filtrosHist.value.dataInicio ? new Date(filtrosHist.value.dataInicio + 'T00:00:00') : null;
         const dataFim = filtrosHist.value.dataFim ? new Date(filtrosHist.value.dataFim + 'T23:59:59') : null;
 
-        // Filtro Data
         if (dataIni && dataItem < dataIni) return false;
         if (dataFim && dataItem > dataFim) return false;
-
-        // Filtro Emoção (usa o campo 'tipo' do filtro visual)
         if (filtrosHist.value.tipo && item.emocao !== filtrosHist.value.tipo) return false;
-
-        // Filtro Relato (usa o campo 'conteudo' do filtro visual)
         if (filtrosHist.value.conteudo && !String(item.relato).toLowerCase().includes(filtrosHist.value.conteudo.toLowerCase())) return false;
 
         return true;
@@ -140,10 +153,23 @@ function limparFiltrosHistorico() {
     filtrosHist.value = { dataInicio: '', dataFim: '', tipo: '', conteudo: '' };
 }
 
-// Helper interno para comparação de datas no filtro
 function parseDataSimples(data) {
     if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0);
     return new Date(data);
+}
+
+// --- NAVEGAÇÃO ENTRE PROFESSOR E TURMA ---
+
+function selecionarProfessor(prof) {
+    professorSelecionado.value = prof;
+    estagioAlunos.value = 'lista-alunos';
+    termoPesquisa.value = ''; // Limpa busca ao entrar na turma
+}
+
+function voltarParaSelecaoProf() {
+    professorSelecionado.value = null;
+    estagioAlunos.value = 'selecao-prof';
+    termoPesquisa.value = '';
 }
 
 // --- LÓGICA DO HISTÓRICO DO ALUNO ---
@@ -177,7 +203,7 @@ function voltarParaLista() {
     alunoSelecionado.value = null;
 }
 
-// --- FUNÇÕES DE FORMATAÇÃO E DEBUG DE DATA ---
+// --- FUNÇÕES DE FORMATAÇÃO ---
 
 function formatarData(data) {
     if (!data) return '-';
@@ -205,20 +231,28 @@ function formatarParaInput(data) {
     return '';
 }
 
-// --- MODAIS ---
+// --- MODAIS DE EDIÇÃO ---
 
 function abrirModalNovoPrincipal() {
     itemEmEdicao.value = {};
     if (activeTab.value === 'alunos') {
-        itemEmEdicao.value = { responsavel: { id: '' } };
+        // Se já estiver dentro de uma turma, pré-seleciona o professor
+        if (professorSelecionado.value) {
+            itemEmEdicao.value = { responsavel: { id: professorSelecionado.value.id } };
+        } else {
+            itemEmEdicao.value = { responsavel: { id: '' } };
+        }
     }
     modalFormAberto.value = true;
 }
 
 function abrirModalEditarPrincipal(item) {
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
+    // Garante estrutura do objeto responsável
     if (activeTab.value === 'alunos' && !itemEmEdicao.value.responsavel) {
-        itemEmEdicao.value.responsavel = { id: '' };
+        // Tenta achar pelo nome se o objeto não veio completo
+        const prof = listaPais.value.find(p => p.nome === item.responsavelNome);
+        itemEmEdicao.value.responsavel = { id: prof ? prof.id : '' };
     }
     modalFormAberto.value = true;
 }
@@ -282,8 +316,15 @@ async function salvar() {
         alert('Salvo com sucesso!');
         modalFormAberto.value = false;
 
-        if (viewMode.value === 'lista') await carregarDadosPrincipais();
-        else await carregarHistorico();
+        // Atualiza a lista correta
+        if (viewMode.value === 'lista') {
+            await carregarDadosPrincipais();
+            // Se salvou um aluno, precisamos atualizar a lista de alunos (dados)
+            // Se salvou um professor, atualiza listaPais
+            if (activeTab.value === 'usuarios') await carregarListaPais();
+        } else {
+            await carregarHistorico();
+        }
 
     } catch (e) {
         alert('Erro ao salvar: ' + (e.response?.data?.error || e.message));
@@ -303,6 +344,10 @@ async function excluir(id) {
         
         if (viewMode.value === 'lista') {
             dados.value = dados.value.filter(i => i.id !== id);
+            // Se deletou um professor, remove da lista de pais também
+            if (activeTab.value === 'usuarios') {
+                listaPais.value = listaPais.value.filter(i => i.id !== id);
+            }
         } else {
             if (subTab.value === 'atividades') historicoJogos.value = historicoJogos.value.filter(i => i.id !== id);
             else historicoDiarios.value = historicoDiarios.value.filter(i => i.id !== id);
@@ -332,7 +377,11 @@ function logout() {
       
       <nav class="flex-1 px-2 md:px-4 space-y-2 mt-4">
         <button v-if="viewMode === 'historico'" @click="voltarParaLista" class="w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] bg-orange-50 text-orange-600 font-bold mb-4 shadow-sm hover:bg-orange-100 transition-colors">
-            <ArrowLeft size="20" /> <span class="hidden md:block">Voltar p/ Lista</span>
+            <ArrowLeft size="20" /> <span class="hidden md:block">Voltar p/ Turma</span>
+        </button>
+
+        <button v-if="viewMode === 'lista' && activeTab === 'alunos' && estagioAlunos === 'lista-alunos'" @click="voltarParaSelecaoProf" class="w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] bg-indigo-50 text-indigo-600 font-bold mb-4 shadow-sm hover:bg-indigo-100 transition-colors">
+            <ArrowLeft size="20" /> <span class="hidden md:block">Trocar Professor</span>
         </button>
 
         <template v-if="viewMode === 'lista'">
@@ -346,7 +395,6 @@ function logout() {
 
         <template v-if="viewMode === 'historico'">
             <div class="hidden md:block px-4 py-2 text-xs font-black text-gray-300 uppercase">Visão do Aluno</div>
-            
             <button @click="subTab = 'atividades'" 
                 :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] font-bold transition-all', subTab === 'atividades' ? 'bg-green-50 text-green-600' : 'text-gray-400']">
                 <BookOpen size="20"/> <span class="hidden md:block">Jogos/Ativ.</span>
@@ -369,18 +417,27 @@ function logout() {
       
       <header class="bg-white rounded-[20px] md:rounded-[30px] p-4 md:p-6 shadow-sm border-2 border-white mb-6 md:mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
         <div class="text-center md:text-left">
-          <h1 class="text-xl md:text-2xl font-black text-gray-700">
-              <span v-if="viewMode === 'lista'">{{ configAbas[activeTab].titulo }}</span>
+          <h1 class="text-xl md:text-2xl font-black text-gray-700 flex items-center gap-2">
+              <span v-if="viewMode === 'lista'">
+                  <span v-if="activeTab === 'usuarios'">Gestão de Equipe</span>
+                  <span v-else-if="estagioAlunos === 'selecao-prof'">Selecione o Professor</span>
+                  <span v-else>Turma de <span class="text-indigo-600">{{ professorSelecionado?.nome }}</span></span>
+              </span>
               <span v-else>Histórico de <span class="text-indigo-600">{{ alunoSelecionado?.nome }}</span></span>
           </h1>
           <p class="text-xs md:text-sm text-gray-400 font-bold">
-              {{ viewMode === 'lista' ? 'Gerenciamento geral' : 'Visualizando registros individuais' }}
+              {{ viewMode === 'lista' ? (activeTab === 'alunos' && estagioAlunos === 'selecao-prof' ? 'Escolha um professor para ver seus alunos' : 'Gerenciamento geral') : 'Visualizando registros individuais' }}
           </p>
         </div>
         
-        <button v-if="viewMode === 'lista'" @click="abrirModalNovoPrincipal" class="btn-primary w-full md:w-auto justify-center">
-            <Plus size="20" /> Novo {{ activeTab === 'usuarios' ? 'Usuário' : 'Aluno' }}
-        </button>
+        <div v-if="viewMode === 'lista'">
+            <button v-if="activeTab === 'usuarios'" @click="abrirModalNovoPrincipal" class="btn-primary w-full md:w-auto justify-center">
+                <Plus size="20" /> Novo Professor/Admin
+            </button>
+            <button v-if="activeTab === 'alunos' && estagioAlunos === 'lista-alunos'" @click="abrirModalNovoPrincipal" class="btn-primary w-full md:w-auto justify-center">
+                <Plus size="20" /> Adicionar Aluno na Turma
+            </button>
+        </div>
         <button v-else @click="abrirModalNovoHistorico" class="btn-primary w-full md:w-auto justify-center">
             <Plus size="20" /> Novo Registro
         </button>
@@ -390,7 +447,7 @@ function logout() {
         <div class="p-4 md:p-6 border-b border-gray-100 flex items-center gap-4">
             <div class="relative flex-1 max-w-md w-full">
               <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="20" />
-              <input v-model="termoPesquisa" type="text" placeholder="Pesquisar por nome ou email..." class="w-full pl-12 pr-4 py-3 bg-gray-50 rounded-[20px] outline-none font-bold text-gray-600 text-sm md:text-base">
+              <input v-model="termoPesquisa" type="text" placeholder="Pesquisar..." class="w-full pl-12 pr-4 py-3 bg-gray-50 rounded-[20px] outline-none font-bold text-gray-600 text-sm md:text-base">
             </div>
         </div>
 
@@ -399,30 +456,46 @@ function logout() {
              <thead class="bg-[#F0F7FF] text-xs uppercase text-gray-400 font-extrabold">
                <tr>
                   <th class="p-3 md:p-6">Nome</th>
-                  <th class="p-3 md:p-6">{{ activeTab === 'usuarios' ? 'Email / Perfil' : 'Professor(a) / Responsável' }}</th>
+                  <th class="p-3 md:p-6" v-if="activeTab === 'usuarios'">Email / Perfil</th>
+                  <th class="p-3 md:p-6" v-if="activeTab === 'alunos'">Responsável</th>
                   <th class="p-3 md:p-6 text-right">Ações</th>
                </tr>
              </thead>
              <tbody class="divide-y divide-gray-50">
                 <tr v-for="item in dadosFiltrados" :key="item.id" class="hover:bg-[#F9FAFB]">
-                   <td class="p-3 md:p-6 font-bold text-gray-700 text-sm md:text-base">{{ item.nome }}</td>
+                   
+                   <td class="p-3 md:p-6 font-bold text-gray-700 text-sm md:text-base">
+                       {{ item.nome }}
+                       <span v-if="activeTab === 'alunos' && estagioAlunos === 'selecao-prof'" class="block text-[10px] text-gray-400 uppercase font-normal">Professor(a)</span>
+                   </td>
                    
                    <td v-if="activeTab === 'usuarios'" class="p-3 md:p-6">
                        <div class="text-xs md:text-sm text-gray-600">{{ item.email }}</div>
                        <span class="badge-indigo">{{ item.perfil }}</span>
                    </td>
-                   <td v-else class="p-3 md:p-6">
-                       <span class="badge-purple">{{ item.nomeResponsavel || (item.responsavel ? item.responsavel.nome : 'Sem professor') }}</span>
+                   <td v-else-if="activeTab === 'alunos'" class="p-3 md:p-6">
+                       <span v-if="estagioAlunos === 'selecao-prof'" class="badge-indigo">RESPONSÁVEL</span>
+                       <span v-else class="badge-purple">{{ item.responsavelNome || (professorSelecionado ? professorSelecionado.nome : '-') }}</span>
                    </td>
 
                    <td class="p-3 md:p-6 text-right flex justify-end gap-2">
-                      <button v-if="activeTab === 'alunos'" @click="abrirHistoricoAluno(item)" class="px-2 md:px-3 py-2 bg-orange-100 text-orange-600 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-200 flex items-center gap-2">
+                      <button v-if="activeTab === 'alunos' && estagioAlunos === 'selecao-prof'" @click="selecionarProfessor(item)" class="px-3 py-2 bg-indigo-100 text-indigo-600 rounded-lg font-bold text-xs hover:bg-indigo-200 flex items-center gap-2">
+                          <UserCheck size="16"/> 📂 Ver Turma
+                      </button>
+
+                      <button v-if="activeTab === 'alunos' && estagioAlunos === 'lista-alunos'" @click="abrirHistoricoAluno(item)" class="px-2 md:px-3 py-2 bg-orange-100 text-orange-600 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-200 flex items-center gap-2">
                           <Calendar size="16"/> <span class="hidden md:inline">Histórico</span>
                       </button>
 
                       <button @click="abrirModalEditarPrincipal(item)" class="icon-btn text-indigo-400"><Edit2 size="18"/></button>
                       <button @click="excluir(item.id)" class="icon-btn text-red-400"><Trash2 size="18"/></button>
                    </td>
+                </tr>
+                <tr v-if="dadosFiltrados.length === 0">
+                    <td colspan="4" class="p-6 text-center text-gray-400 font-bold">
+                        <span v-if="activeTab === 'alunos' && estagioAlunos === 'lista-alunos'">Nenhum aluno nesta turma.</span>
+                        <span v-else>Nenhum registro encontrado.</span>
+                    </td>
                 </tr>
              </tbody>
           </table>
@@ -556,7 +629,7 @@ function logout() {
                  </template>
                  <template v-if="activeTab === 'alunos'">
                     <div><label class="label">Nome do Aluno</label><input v-model="itemEmEdicao.nome" class="input"></div>
-                    <div><label class="label">Selecione o Professor(a)</label>
+                    <div><label class="label">Professor(a) Responsável</label>
                        <select v-model="itemEmEdicao.responsavel.id" class="input">
                           <option disabled value="">Selecione...</option>
                           <option v-for="p in listaPais" :value="p.id" :key="p.id">{{ p.nome }}</option>
