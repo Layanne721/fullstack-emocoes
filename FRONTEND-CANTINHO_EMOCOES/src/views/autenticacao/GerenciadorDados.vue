@@ -94,8 +94,9 @@ async function carregarHistorico() {
             api.get('/api/admin/atividades'),
             api.get('/api/admin/diarios')
         ]);
-        historicoJogos.value = resAtiv.data.filter(a => a.alunoId === alunoSelecionado.value.id);
-        historicoDiarios.value = resDiarios.data.filter(d => d.alunoId === alunoSelecionado.value.id);
+        // Filtra localmente os dados do aluno selecionado
+        historicoJogos.value = resAtiv.data.filter(a => a.alunoId === alunoSelecionado.value.id || (a.aluno && a.aluno.id === alunoSelecionado.value.id));
+        historicoDiarios.value = resDiarios.data.filter(d => d.alunoId === alunoSelecionado.value.id || (d.dependente && d.dependente.id === alunoSelecionado.value.id));
     } catch (e) {
         console.error("Erro ao carregar histórico", e);
     } finally {
@@ -106,6 +107,39 @@ async function carregarHistorico() {
 function voltarParaLista() {
     viewMode.value = 'lista';
     alunoSelecionado.value = null;
+}
+
+// --- FUNÇÕES AUXILIARES DE DATA (CRÍTICO PARA O FIX) ---
+
+// 1. Formata qualquer coisa (Array ou String) para exibir na tabela (PT-BR)
+function formatarData(data) {
+    if (!data) return '-';
+    try {
+        // Se for Array do Java: [2024, 12, 25, 14, 30]
+        if (Array.isArray(data)) {
+            return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+        }
+        // Se for String ISO: "2024-12-25T14:30:00"
+        return new Date(data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    } catch (e) {
+        return data; // Retorna original se falhar
+    }
+}
+
+// 2. Formata Array do Java para o Input HTML (yyyy-MM-ddThh:mm)
+function formatarParaInput(data) {
+    if (!data) return '';
+    // Se for Array: [2024, 12, 25, 14, 30]
+    if (Array.isArray(data)) {
+        const y = data[0];
+        const m = String(data[1]).padStart(2, '0');
+        const d = String(data[2]).padStart(2, '0');
+        const h = String(data[3] || 0).padStart(2, '0');
+        const min = String(data[4] || 0).padStart(2, '0');
+        return `${y}-${m}-${d}T${h}:${min}`;
+    }
+    // Se for String, garante que corta os segundos para caber no input
+    return String(data).slice(0, 16);
 }
 
 // --- EDIÇÃO E CRIAÇÃO ---
@@ -126,29 +160,13 @@ function abrirModalEditarPrincipal(item) {
     modalFormAberto.value = true;
 }
 
-// CORREÇÃO: Função auxiliar para formatar a data corretamente para o Input HTML
-function formatarParaInput(data) {
-    if (!data) return '';
-    // Se for array do Java [ano, mes, dia, hora, min, seg]
-    if (Array.isArray(data)) {
-        const y = data[0];
-        const m = String(data[1]).padStart(2, '0');
-        const d = String(data[2]).padStart(2, '0');
-        const h = String(data[3] || 0).padStart(2, '0');
-        const min = String(data[4] || 0).padStart(2, '0');
-        return `${y}-${m}-${d}T${h}:${min}`;
-    }
-    // Se já for string (ex: ISO), corta para YYYY-MM-DDTHH:MM
-    return String(data).slice(0, 16);
-}
-
 function abrirModalNovoHistorico() {
     itemEmEdicao.value = { 
         aluno: { id: alunoSelecionado.value.id }, 
         dependente: { id: alunoSelecionado.value.id } 
     };
 
-    // Pega data local para o input datetime-local não vir com horas erradas
+    // Pega data local correta para preencher o input
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     const dataLocal = now.toISOString().slice(0, 16);
@@ -167,11 +185,16 @@ function abrirModalNovoHistorico() {
 function abrirModalEditarHistorico(item) {
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
     
-    // CORREÇÃO: Aplica a formatação para o input ler a data corretamente
-    itemEmEdicao.value.dataRealizacao = formatarParaInput(itemEmEdicao.value.dataRealizacao);
-    itemEmEdicao.value.dataRegistro = formatarParaInput(itemEmEdicao.value.dataRegistro);
+    // FIX: Converte o dado que veio do banco (Array ou String) para o formato que o Input aceita
+    if (subTab.value === 'atividades') {
+        itemEmEdicao.value.dataRealizacao = formatarParaInput(itemEmEdicao.value.dataRealizacao);
+    } else {
+        itemEmEdicao.value.dataRegistro = formatarParaInput(itemEmEdicao.value.dataRegistro);
+    }
 
     if (!itemEmEdicao.value.aluno) itemEmEdicao.value.aluno = { id: alunoSelecionado.value.id };
+    if (!itemEmEdicao.value.dependente) itemEmEdicao.value.dependente = { id: alunoSelecionado.value.id };
+    
     modalFormAberto.value = true;
 }
 
@@ -180,20 +203,26 @@ async function salvar() {
         let url = '';
         let payload = { ...itemEmEdicao.value };
 
-        // CORREÇÃO: Garante que a data tenha segundos (:00) para o Java aceitar
-        if (payload.dataRealizacao && payload.dataRealizacao.length === 16) {
+        // FIX: Adiciona os segundos (:00) se for string, para o Java aceitar como LocalDateTime
+        if (payload.dataRealizacao && typeof payload.dataRealizacao === 'string' && payload.dataRealizacao.length === 16) {
             payload.dataRealizacao += ':00';
         }
-        if (payload.dataRegistro && payload.dataRegistro.length === 16) {
+        if (payload.dataRegistro && typeof payload.dataRegistro === 'string' && payload.dataRegistro.length === 16) {
             payload.dataRegistro += ':00';
         }
 
+        // Define a URL correta
         if (viewMode.value === 'lista') {
             url = configAbas[activeTab.value].url;
         } else {
             url = subTab.value === 'atividades' ? '/api/admin/atividades' : '/api/admin/diarios';
+            
+            // Garante o ID do aluno no payload
             if (subTab.value === 'atividades') {
                 payload.aluno = { id: alunoSelecionado.value.id };
+            } else {
+                // Diário costuma usar o ID no path ou body, ajustando para garantir
+                payload.id = itemEmEdicao.value.id; 
             }
         }
 
@@ -201,11 +230,13 @@ async function salvar() {
         alert('Salvo com sucesso!');
         modalFormAberto.value = false;
 
+        // Recarrega do servidor para garantir que temos o formato oficial (Array)
         if (viewMode.value === 'lista') await carregarDadosPrincipais();
         else await carregarHistorico();
 
     } catch (e) {
         alert('Erro ao salvar: ' + (e.response?.data?.error || e.message));
+        console.error(e);
     }
 }
 
@@ -223,20 +254,13 @@ async function excluir(id) {
         if (viewMode.value === 'lista') {
             dados.value = dados.value.filter(i => i.id !== id);
         } else {
+            // Atualiza localmente
             if (subTab.value === 'atividades') historicoJogos.value = historicoJogos.value.filter(i => i.id !== id);
             else historicoDiarios.value = historicoDiarios.value.filter(i => i.id !== id);
         }
     } catch (e) {
         alert('Erro ao excluir.');
     }
-}
-
-// Helpers
-function formatarData(data) {
-    if (!data) return '-';
-    // Trata array do Java para exibição na tabela
-    if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0).toLocaleString('pt-BR');
-    return new Date(data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 function logout() {
