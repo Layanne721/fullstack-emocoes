@@ -126,29 +126,7 @@ function abrirModalEditarPrincipal(item) {
     modalFormAberto.value = true;
 }
 
-function abrirModalNovoHistorico() {
-    itemEmEdicao.value = { 
-        aluno: { id: alunoSelecionado.value.id }, 
-        dependente: { id: alunoSelecionado.value.id } 
-    };
-
-    // CORREÇÃO: Usar fuso horário local para o input datetime-local
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    const dataLocal = now.toISOString().slice(0, 16);
-
-    if (subTab.value === 'atividades') {
-        itemEmEdicao.value.tipo = 'VOGAL';
-        itemEmEdicao.value.dataRealizacao = dataLocal;
-    } else {
-        itemEmEdicao.value.emocao = 'FELIZ';
-        itemEmEdicao.value.intensidade = 3;
-        itemEmEdicao.value.dataRegistro = dataLocal;
-    }
-    modalFormAberto.value = true;
-}
-
-// CORREÇÃO: Função auxiliar para formatar array [y,m,d,h,m] ou string ISO para input HTML
+// CORREÇÃO: Função auxiliar para formatar a data corretamente para o Input HTML
 function formatarParaInput(data) {
     if (!data) return '';
     // Se for array do Java [ano, mes, dia, hora, min, seg]
@@ -164,10 +142,32 @@ function formatarParaInput(data) {
     return String(data).slice(0, 16);
 }
 
+function abrirModalNovoHistorico() {
+    itemEmEdicao.value = { 
+        aluno: { id: alunoSelecionado.value.id }, 
+        dependente: { id: alunoSelecionado.value.id } 
+    };
+
+    // Pega data local para o input datetime-local não vir com horas erradas
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    const dataLocal = now.toISOString().slice(0, 16);
+
+    if (subTab.value === 'atividades') {
+        itemEmEdicao.value.tipo = 'VOGAL';
+        itemEmEdicao.value.dataRealizacao = dataLocal;
+    } else {
+        itemEmEdicao.value.emocao = 'FELIZ';
+        itemEmEdicao.value.intensidade = 3;
+        itemEmEdicao.value.dataRegistro = dataLocal;
+    }
+    modalFormAberto.value = true;
+}
+
 function abrirModalEditarHistorico(item) {
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
     
-    // CORREÇÃO: Aplica a formatação correta para o input não ficar vazio
+    // CORREÇÃO: Aplica a formatação para o input ler a data corretamente
     itemEmEdicao.value.dataRealizacao = formatarParaInput(itemEmEdicao.value.dataRealizacao);
     itemEmEdicao.value.dataRegistro = formatarParaInput(itemEmEdicao.value.dataRegistro);
 
@@ -179,6 +179,14 @@ async function salvar() {
     try {
         let url = '';
         let payload = { ...itemEmEdicao.value };
+
+        // CORREÇÃO: Garante que a data tenha segundos (:00) para o Java aceitar
+        if (payload.dataRealizacao && payload.dataRealizacao.length === 16) {
+            payload.dataRealizacao += ':00';
+        }
+        if (payload.dataRegistro && payload.dataRegistro.length === 16) {
+            payload.dataRegistro += ':00';
+        }
 
         if (viewMode.value === 'lista') {
             url = configAbas[activeTab.value].url;
@@ -226,6 +234,7 @@ async function excluir(id) {
 // Helpers
 function formatarData(data) {
     if (!data) return '-';
+    // Trata array do Java para exibição na tabela
     if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0).toLocaleString('pt-BR');
     return new Date(data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
