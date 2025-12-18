@@ -14,8 +14,8 @@ const authStore = useAuthStore();
 // --- ESTADO GERAL ---
 const loading = ref(false);
 const termoPesquisa = ref('');
-const listaPais = ref([]); // Para criar novos alunos
-const dados = ref([]); // Lista da tabela principal
+const listaPais = ref([]); 
+const dados = ref([]); 
 
 // Controle de Navegação
 const viewMode = ref('lista'); 
@@ -71,7 +71,6 @@ async function carregarListaPais() {
     } catch (e) {}
 }
 
-// Filtro da Tabela Principal
 const dadosFiltrados = computed(() => {
   if (!termoPesquisa.value) return dados.value;
   const termo = termoPesquisa.value.toLowerCase();
@@ -109,40 +108,50 @@ function voltarParaLista() {
     alunoSelecionado.value = null;
 }
 
-// --- FUNÇÕES AUXILIARES DE DATA (CRÍTICO PARA O FIX) ---
+// --- FUNÇÕES DE FORMATAÇÃO E DEBUG DE DATA ---
 
-// 1. Formata qualquer coisa (Array ou String) para exibir na tabela (PT-BR)
+// Formata para exibição na tabela (Visual apenas)
 function formatarData(data) {
     if (!data) return '-';
     try {
-        // Se for Array do Java: [2024, 12, 25, 14, 30]
+        // Array do Java: [2024, 12, 25, 14, 30] -> Mês é 1-12 no Array do Java
+        // JS Date espera mês 0-11.
         if (Array.isArray(data)) {
             return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
         }
-        // Se for String ISO: "2024-12-25T14:30:00"
         return new Date(data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-    } catch (e) {
-        return data; // Retorna original se falhar
-    }
+    } catch (e) { return data; }
 }
 
-// 2. Formata Array do Java para o Input HTML (yyyy-MM-ddThh:mm)
+// Formata para o INPUT (yyyy-MM-ddThh:mm) - Essencial para editar
 function formatarParaInput(data) {
+    console.log("DEBUG: formatarParaInput recebeu:", data); // LOG PARA VER O QUE CHEGA
+    
     if (!data) return '';
+    
     // Se for Array: [2024, 12, 25, 14, 30]
     if (Array.isArray(data)) {
         const y = data[0];
-        const m = String(data[1]).padStart(2, '0');
+        const m = String(data[1]).padStart(2, '0'); // Mês 1-12 do Java vai direto pra String ISO 01-12
         const d = String(data[2]).padStart(2, '0');
         const h = String(data[3] || 0).padStart(2, '0');
         const min = String(data[4] || 0).padStart(2, '0');
-        return `${y}-${m}-${d}T${h}:${min}`;
+        const result = `${y}-${m}-${d}T${h}:${min}`;
+        console.log("DEBUG: Convertido Array -> String:", result);
+        return result;
     }
-    // Se for String, garante que corta os segundos para caber no input
-    return String(data).slice(0, 16);
+    
+    // Se já for String (ISO), corta para caber no input
+    if (typeof data === 'string') {
+        const result = data.slice(0, 16);
+        console.log("DEBUG: Convertido String -> String:", result);
+        return result;
+    }
+    
+    return '';
 }
 
-// --- EDIÇÃO E CRIAÇÃO ---
+// --- MODAIS ---
 
 function abrirModalNovoPrincipal() {
     itemEmEdicao.value = {};
@@ -166,7 +175,7 @@ function abrirModalNovoHistorico() {
         dependente: { id: alunoSelecionado.value.id } 
     };
 
-    // Pega data local correta para preencher o input
+    // Data local atual
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     const dataLocal = now.toISOString().slice(0, 16);
@@ -183,60 +192,69 @@ function abrirModalNovoHistorico() {
 }
 
 function abrirModalEditarHistorico(item) {
+    console.log("DEBUG: Abrindo edição para o item:", item); // LOG PARA VER O OBJETO ORIGINAL
+
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
     
-    // FIX: Converte o dado que veio do banco (Array ou String) para o formato que o Input aceita
+    // Converte a data para o input ler corretamente
     if (subTab.value === 'atividades') {
         itemEmEdicao.value.dataRealizacao = formatarParaInput(itemEmEdicao.value.dataRealizacao);
     } else {
         itemEmEdicao.value.dataRegistro = formatarParaInput(itemEmEdicao.value.dataRegistro);
     }
 
+    // Garante as referências de ID
     if (!itemEmEdicao.value.aluno) itemEmEdicao.value.aluno = { id: alunoSelecionado.value.id };
     if (!itemEmEdicao.value.dependente) itemEmEdicao.value.dependente = { id: alunoSelecionado.value.id };
     
+    console.log("DEBUG: Objeto pronto para o formulário:", itemEmEdicao.value); // LOG PARA VER O ESTADO FINAL
     modalFormAberto.value = true;
 }
 
 async function salvar() {
+    console.log("DEBUG: Tentando salvar...", itemEmEdicao.value);
+
     try {
         let url = '';
         let payload = { ...itemEmEdicao.value };
 
-        // FIX: Adiciona os segundos (:00) se for string, para o Java aceitar como LocalDateTime
-        if (payload.dataRealizacao && typeof payload.dataRealizacao === 'string' && payload.dataRealizacao.length === 16) {
+        // ADICIONA SEGUNDOS SE FALTAR (Para o Java aceitar como LocalDateTime ISO)
+        if (payload.dataRealizacao && payload.dataRealizacao.length === 16) {
             payload.dataRealizacao += ':00';
         }
-        if (payload.dataRegistro && typeof payload.dataRegistro === 'string' && payload.dataRegistro.length === 16) {
+        if (payload.dataRegistro && payload.dataRegistro.length === 16) {
             payload.dataRegistro += ':00';
         }
 
-        // Define a URL correta
+        console.log("DEBUG: Payload final enviando pro Backend:", payload);
+
         if (viewMode.value === 'lista') {
             url = configAbas[activeTab.value].url;
         } else {
             url = subTab.value === 'atividades' ? '/api/admin/atividades' : '/api/admin/diarios';
             
-            // Garante o ID do aluno no payload
+            // Se for update (tem ID), e url não tiver ID, o backend pode exigir ID no path ou no body
+            // Vamos garantir IDs aninhados
             if (subTab.value === 'atividades') {
                 payload.aluno = { id: alunoSelecionado.value.id };
             } else {
-                // Diário costuma usar o ID no path ou body, ajustando para garantir
                 payload.id = itemEmEdicao.value.id; 
             }
         }
 
-        await api.post(url, payload);
+        const response = await api.post(url, payload);
+        console.log("DEBUG: Resposta do servidor:", response.data);
+
         alert('Salvo com sucesso!');
         modalFormAberto.value = false;
 
-        // Recarrega do servidor para garantir que temos o formato oficial (Array)
+        // Atualiza a lista
         if (viewMode.value === 'lista') await carregarDadosPrincipais();
         else await carregarHistorico();
 
     } catch (e) {
+        console.error("DEBUG: Erro ao salvar:", e);
         alert('Erro ao salvar: ' + (e.response?.data?.error || e.message));
-        console.error(e);
     }
 }
 
@@ -254,7 +272,6 @@ async function excluir(id) {
         if (viewMode.value === 'lista') {
             dados.value = dados.value.filter(i => i.id !== id);
         } else {
-            // Atualiza localmente
             if (subTab.value === 'atividades') historicoJogos.value = historicoJogos.value.filter(i => i.id !== id);
             else historicoDiarios.value = historicoDiarios.value.filter(i => i.id !== id);
         }
