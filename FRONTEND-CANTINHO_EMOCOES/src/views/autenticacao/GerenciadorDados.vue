@@ -26,7 +26,7 @@ const subTab = ref('atividades');
 const estagioAlunos = ref('selecao-prof'); 
 const professorSelecionado = ref(null);
 
-// FILTROS SIMPLIFICADOS (NOVO)
+// FILTROS SIMPLIFICADOS
 const filtrosHist = ref({
     ordem: 'desc', // 'desc' (Mais recente) ou 'asc' (Mais antigo)
     tipoAtividade: '' // Apenas para Jogos
@@ -112,7 +112,7 @@ const dadosFiltrados = computed(() => {
   return listaBase.filter(item => JSON.stringify(item).toLowerCase().includes(termo));
 });
 
-// --- FILTROS DE HISTÓRICO (CORRIGIDO E SIMPLIFICADO) ---
+// --- FILTROS DE HISTÓRICO ---
 
 const historicoJogosFiltrados = computed(() => {
     let lista = [...historicoJogos.value];
@@ -134,8 +134,6 @@ const historicoJogosFiltrados = computed(() => {
 
 const historicoDiariosFiltrados = computed(() => {
     let lista = [...historicoDiarios.value];
-
-    // Diário NÃO tem filtro de tipo aqui, apenas ordenação
     
     // 1. Ordenação por Data
     lista.sort((a, b) => {
@@ -149,7 +147,6 @@ const historicoDiariosFiltrados = computed(() => {
 
 function parseDataSimples(data) {
     if (!data) return new Date(0);
-    // Array Java: [ano, mes, dia, hora, min] -> Mês no JS é 0-indexado
     if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0);
     return new Date(data);
 }
@@ -241,7 +238,8 @@ function abrirModalNovoPrincipal() {
 
 function abrirModalEditarPrincipal(item) {
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
-    if (activeTab.value === 'alunos' && !itemEmEdicao.value.responsavel) {
+    // Se for edição de aluno, garante que o responsável esteja preenchido
+    if (activeTab.value === 'alunos' && estagioAlunos === 'lista-alunos' && !itemEmEdicao.value.responsavel) {
         const prof = listaPais.value.find(p => p.nome === item.responsavelNome);
         itemEmEdicao.value.responsavel = { id: prof ? prof.id : '' };
     }
@@ -444,7 +442,9 @@ function logout() {
                <tr>
                   <th class="p-3 md:p-6">Nome</th>
                   <th class="p-3 md:p-6" v-if="activeTab === 'usuarios'">Email / Perfil</th>
-                  <th class="p-3 md:p-6" v-if="activeTab === 'alunos'">Responsável</th>
+                  <th class="p-3 md:p-6" v-if="activeTab === 'alunos'">
+                      {{ estagioAlunos === 'selecao-prof' ? 'Email' : 'Professor(a) Responsável' }}
+                  </th>
                   <th class="p-3 md:p-6 text-right">Ações</th>
                </tr>
              </thead>
@@ -461,7 +461,7 @@ function logout() {
                        <span class="badge-indigo">{{ item.perfil }}</span>
                    </td>
                    <td v-else-if="activeTab === 'alunos'" class="p-3 md:p-6">
-                       <span v-if="estagioAlunos === 'selecao-prof'" class="badge-indigo">RESPONSÁVEL</span>
+                       <span v-if="estagioAlunos === 'selecao-prof'" class="text-xs md:text-sm text-gray-600">{{ item.email }}</span>
                        <span v-else class="badge-purple">{{ item.responsavelNome || (professorSelecionado ? professorSelecionado.nome : '-') }}</span>
                    </td>
 
@@ -589,7 +589,7 @@ function logout() {
           <div class="bg-indigo-600 p-4 md:p-6 flex justify-between items-center text-white">
              <h3 class="font-black text-lg md:text-xl">
                  {{ itemEmEdicao.id ? 'Editar' : 'Novo' }} 
-                 {{ viewMode === 'historico' ? 'Registro' : (activeTab === 'usuarios' ? 'Usuário' : 'Aluno') }}
+                 {{ viewMode === 'historico' ? 'Registro' : (activeTab === 'usuarios' ? 'Usuário' : (estagioAlunos === 'selecao-prof' ? 'Professor' : 'Aluno')) }}
              </h3>
              <button @click="modalFormAberto = false" class="hover:bg-white/20 p-2 rounded-full"><X size="20"/></button>
           </div>
@@ -608,12 +608,19 @@ function logout() {
                     </div>
                  </template>
                  <template v-if="activeTab === 'alunos'">
-                    <div><label class="label">Nome do Aluno</label><input v-model="itemEmEdicao.nome" class="input"></div>
-                    <div><label class="label">Professor(a) Responsável</label>
-                       <select v-model="itemEmEdicao.responsavel.id" class="input">
-                          <option disabled value="">Selecione...</option>
-                          <option v-for="p in listaPais" :value="p.id" :key="p.id">{{ p.nome }}</option>
-                       </select>
+                    <div v-if="estagioAlunos === 'selecao-prof'">
+                        <div><label class="label">Nome do Professor(a)</label><input v-model="itemEmEdicao.nome" class="input"></div>
+                        <div><label class="label">Email</label><input v-model="itemEmEdicao.email" class="input"></div>
+                        </div>
+
+                    <div v-else>
+                        <div><label class="label">Nome do Aluno</label><input v-model="itemEmEdicao.nome" class="input"></div>
+                        <div><label class="label">Professor(a) Responsável</label>
+                           <select v-model="itemEmEdicao.responsavel.id" class="input">
+                              <option disabled value="">Selecione...</option>
+                              <option v-for="p in listaPais" :value="p.id" :key="p.id">{{ p.nome }}</option>
+                           </select>
+                        </div>
                     </div>
                  </template>
              </template>
