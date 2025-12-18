@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import api from '@/services/api';
 import { 
   Users, GraduationCap, LogOut, Search, Plus, Edit2, Trash2, X, Save, 
-  ArrowLeft, BookOpen, Database, Calendar
+  ArrowLeft, BookOpen, Database, Calendar, Filter, Eraser
 } from 'lucide-vue-next';
 
 const router = useRouter();
@@ -14,13 +14,21 @@ const authStore = useAuthStore();
 // --- ESTADO GERAL ---
 const loading = ref(false);
 const termoPesquisa = ref('');
-const listaPais = ref([]); // Para criar novos alunos
-const dados = ref([]); // Lista da tabela principal
+const listaPais = ref([]); 
+const dados = ref([]); 
 
 // Controle de Navegação
 const viewMode = ref('lista'); 
 const activeTab = ref('usuarios'); 
 const subTab = ref('atividades'); 
+
+// Filtros do Histórico (NOVO)
+const filtrosHist = ref({
+    dataInicio: '',
+    dataFim: '',
+    tipo: '',
+    conteudo: ''
+});
 
 // Aluno selecionado para visualização de histórico
 const alunoSelecionado = ref(null); 
@@ -30,6 +38,10 @@ const historicoDiarios = ref([]);
 // Controle de Modais
 const modalFormAberto = ref(false);
 const itemEmEdicao = ref({});
+
+// Listas para Selects de Filtro
+const tiposAtividade = ['VOGAL', 'CONSOANTE', 'NUMERO', 'FORMA', 'EMOCAO', 'FRUTA', 'LIVRE', 'OUTRO'];
+const tiposEmocao = ['FELIZ', 'TRISTE', 'BRAVO', 'MEDO', 'ANSIOSO', 'CALMO', 'NOJINHO'];
 
 // Configuração das Abas Principais
 const configAbas = {
@@ -47,6 +59,11 @@ watch(activeTab, () => {
   termoPesquisa.value = '';
   dados.value = [];
   carregarDadosPrincipais();
+});
+
+// Limpa filtros ao trocar de aba no histórico
+watch(subTab, () => {
+    limparFiltrosHistorico();
 });
 
 // --- CARREGAMENTO DE DADOS ---
@@ -67,16 +84,67 @@ async function carregarDadosPrincipais() {
 async function carregarListaPais() {
     try {
         const res = await api.get('/api/admin/usuarios');
-        listaPais.value = res.data;
+        listaPais.value = res.data; // Aqui vêm os professores/responsáveis
     } catch (e) {}
 }
 
-// Filtro da Tabela Principal
 const dadosFiltrados = computed(() => {
   if (!termoPesquisa.value) return dados.value;
   const termo = termoPesquisa.value.toLowerCase();
   return dados.value.filter(item => JSON.stringify(item).toLowerCase().includes(termo));
 });
+
+// --- FILTROS DE HISTÓRICO (COMPUTEDS) ---
+
+const historicoJogosFiltrados = computed(() => {
+    return historicoJogos.value.filter(item => {
+        const dataItem = parseDataSimples(item.dataRealizacao);
+        const dataIni = filtrosHist.value.dataInicio ? new Date(filtrosHist.value.dataInicio + 'T00:00:00') : null;
+        const dataFim = filtrosHist.value.dataFim ? new Date(filtrosHist.value.dataFim + 'T23:59:59') : null;
+
+        // Filtro Data
+        if (dataIni && dataItem < dataIni) return false;
+        if (dataFim && dataItem > dataFim) return false;
+
+        // Filtro Tipo
+        if (filtrosHist.value.tipo && item.tipo !== filtrosHist.value.tipo) return false;
+
+        // Filtro Conteúdo
+        if (filtrosHist.value.conteudo && !String(item.conteudo).toLowerCase().includes(filtrosHist.value.conteudo.toLowerCase())) return false;
+
+        return true;
+    });
+});
+
+const historicoDiariosFiltrados = computed(() => {
+    return historicoDiarios.value.filter(item => {
+        const dataItem = parseDataSimples(item.dataRegistro);
+        const dataIni = filtrosHist.value.dataInicio ? new Date(filtrosHist.value.dataInicio + 'T00:00:00') : null;
+        const dataFim = filtrosHist.value.dataFim ? new Date(filtrosHist.value.dataFim + 'T23:59:59') : null;
+
+        // Filtro Data
+        if (dataIni && dataItem < dataIni) return false;
+        if (dataFim && dataItem > dataFim) return false;
+
+        // Filtro Emoção (usa o campo 'tipo' do filtro visual)
+        if (filtrosHist.value.tipo && item.emocao !== filtrosHist.value.tipo) return false;
+
+        // Filtro Relato (usa o campo 'conteudo' do filtro visual)
+        if (filtrosHist.value.conteudo && !String(item.relato).toLowerCase().includes(filtrosHist.value.conteudo.toLowerCase())) return false;
+
+        return true;
+    });
+});
+
+function limparFiltrosHistorico() {
+    filtrosHist.value = { dataInicio: '', dataFim: '', tipo: '', conteudo: '' };
+}
+
+// Helper interno para comparação de datas no filtro
+function parseDataSimples(data) {
+    if (Array.isArray(data)) return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0);
+    return new Date(data);
+}
 
 // --- LÓGICA DO HISTÓRICO DO ALUNO ---
 
@@ -84,6 +152,7 @@ async function abrirHistoricoAluno(aluno) {
     alunoSelecionado.value = aluno;
     viewMode.value = 'historico';
     subTab.value = 'atividades';
+    limparFiltrosHistorico();
     await carregarHistorico();
 }
 
@@ -94,7 +163,6 @@ async function carregarHistorico() {
             api.get('/api/admin/atividades'),
             api.get('/api/admin/diarios')
         ]);
-        // Filtra localmente os dados do aluno selecionado
         historicoJogos.value = resAtiv.data.filter(a => a.alunoId === alunoSelecionado.value.id || (a.aluno && a.aluno.id === alunoSelecionado.value.id));
         historicoDiarios.value = resDiarios.data.filter(d => d.alunoId === alunoSelecionado.value.id || (d.dependente && d.dependente.id === alunoSelecionado.value.id));
     } catch (e) {
@@ -109,27 +177,20 @@ function voltarParaLista() {
     alunoSelecionado.value = null;
 }
 
-// --- FUNÇÕES AUXILIARES DE DATA (CRÍTICO PARA O FIX) ---
+// --- FUNÇÕES DE FORMATAÇÃO E DEBUG DE DATA ---
 
-// 1. Formata qualquer coisa (Array ou String) para exibir na tabela (PT-BR)
 function formatarData(data) {
     if (!data) return '-';
     try {
-        // Se for Array do Java: [2024, 12, 25, 14, 30]
         if (Array.isArray(data)) {
             return new Date(data[0], data[1]-1, data[2], data[3]||0, data[4]||0).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
         }
-        // Se for String ISO: "2024-12-25T14:30:00"
         return new Date(data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-    } catch (e) {
-        return data; // Retorna original se falhar
-    }
+    } catch (e) { return data; }
 }
 
-// 2. Formata Array do Java para o Input HTML (yyyy-MM-ddThh:mm)
 function formatarParaInput(data) {
     if (!data) return '';
-    // Se for Array: [2024, 12, 25, 14, 30]
     if (Array.isArray(data)) {
         const y = data[0];
         const m = String(data[1]).padStart(2, '0');
@@ -138,11 +199,13 @@ function formatarParaInput(data) {
         const min = String(data[4] || 0).padStart(2, '0');
         return `${y}-${m}-${d}T${h}:${min}`;
     }
-    // Se for String, garante que corta os segundos para caber no input
-    return String(data).slice(0, 16);
+    if (typeof data === 'string') {
+        return data.slice(0, 16);
+    }
+    return '';
 }
 
-// --- EDIÇÃO E CRIAÇÃO ---
+// --- MODAIS ---
 
 function abrirModalNovoPrincipal() {
     itemEmEdicao.value = {};
@@ -166,7 +229,6 @@ function abrirModalNovoHistorico() {
         dependente: { id: alunoSelecionado.value.id } 
     };
 
-    // Pega data local correta para preencher o input
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     const dataLocal = now.toISOString().slice(0, 16);
@@ -185,7 +247,6 @@ function abrirModalNovoHistorico() {
 function abrirModalEditarHistorico(item) {
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
     
-    // FIX: Converte o dado que veio do banco (Array ou String) para o formato que o Input aceita
     if (subTab.value === 'atividades') {
         itemEmEdicao.value.dataRealizacao = formatarParaInput(itemEmEdicao.value.dataRealizacao);
     } else {
@@ -203,25 +264,16 @@ async function salvar() {
         let url = '';
         let payload = { ...itemEmEdicao.value };
 
-        // FIX: Adiciona os segundos (:00) se for string, para o Java aceitar como LocalDateTime
-        if (payload.dataRealizacao && typeof payload.dataRealizacao === 'string' && payload.dataRealizacao.length === 16) {
-            payload.dataRealizacao += ':00';
-        }
-        if (payload.dataRegistro && typeof payload.dataRegistro === 'string' && payload.dataRegistro.length === 16) {
-            payload.dataRegistro += ':00';
-        }
+        if (payload.dataRealizacao && payload.dataRealizacao.length === 16) payload.dataRealizacao += ':00';
+        if (payload.dataRegistro && payload.dataRegistro.length === 16) payload.dataRegistro += ':00';
 
-        // Define a URL correta
         if (viewMode.value === 'lista') {
             url = configAbas[activeTab.value].url;
         } else {
             url = subTab.value === 'atividades' ? '/api/admin/atividades' : '/api/admin/diarios';
-            
-            // Garante o ID do aluno no payload
             if (subTab.value === 'atividades') {
                 payload.aluno = { id: alunoSelecionado.value.id };
             } else {
-                // Diário costuma usar o ID no path ou body, ajustando para garantir
                 payload.id = itemEmEdicao.value.id; 
             }
         }
@@ -230,13 +282,11 @@ async function salvar() {
         alert('Salvo com sucesso!');
         modalFormAberto.value = false;
 
-        // Recarrega do servidor para garantir que temos o formato oficial (Array)
         if (viewMode.value === 'lista') await carregarDadosPrincipais();
         else await carregarHistorico();
 
     } catch (e) {
         alert('Erro ao salvar: ' + (e.response?.data?.error || e.message));
-        console.error(e);
     }
 }
 
@@ -254,7 +304,6 @@ async function excluir(id) {
         if (viewMode.value === 'lista') {
             dados.value = dados.value.filter(i => i.id !== id);
         } else {
-            // Atualiza localmente
             if (subTab.value === 'atividades') historicoJogos.value = historicoJogos.value.filter(i => i.id !== id);
             else historicoDiarios.value = historicoDiarios.value.filter(i => i.id !== id);
         }
@@ -300,7 +349,7 @@ function logout() {
             
             <button @click="subTab = 'atividades'" 
                 :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] font-bold transition-all', subTab === 'atividades' ? 'bg-green-50 text-green-600' : 'text-gray-400']">
-                <BookOpen size="20"/> <span class="hidden md:block">Jogos</span>
+                <BookOpen size="20"/> <span class="hidden md:block">Jogos/Ativ.</span>
             </button>
             <button @click="subTab = 'diarios'" 
                 :class="['w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-4 py-3 rounded-[20px] font-bold transition-all', subTab === 'diarios' ? 'bg-blue-50 text-blue-600' : 'text-gray-400']">
@@ -341,7 +390,7 @@ function logout() {
         <div class="p-4 md:p-6 border-b border-gray-100 flex items-center gap-4">
             <div class="relative flex-1 max-w-md w-full">
               <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size="20" />
-              <input v-model="termoPesquisa" type="text" placeholder="Pesquisar..." class="w-full pl-12 pr-4 py-3 bg-gray-50 rounded-[20px] outline-none font-bold text-gray-600 text-sm md:text-base">
+              <input v-model="termoPesquisa" type="text" placeholder="Pesquisar por nome ou email..." class="w-full pl-12 pr-4 py-3 bg-gray-50 rounded-[20px] outline-none font-bold text-gray-600 text-sm md:text-base">
             </div>
         </div>
 
@@ -350,7 +399,7 @@ function logout() {
              <thead class="bg-[#F0F7FF] text-xs uppercase text-gray-400 font-extrabold">
                <tr>
                   <th class="p-3 md:p-6">Nome</th>
-                  <th class="p-3 md:p-6">{{ activeTab === 'usuarios' ? 'Email / Perfil' : 'Responsável' }}</th>
+                  <th class="p-3 md:p-6">{{ activeTab === 'usuarios' ? 'Email / Perfil' : 'Professor(a) / Responsável' }}</th>
                   <th class="p-3 md:p-6 text-right">Ações</th>
                </tr>
              </thead>
@@ -363,7 +412,7 @@ function logout() {
                        <span class="badge-indigo">{{ item.perfil }}</span>
                    </td>
                    <td v-else class="p-3 md:p-6">
-                       <span class="badge-purple">{{ item.nomeResponsavel || (item.responsavel ? item.responsavel.nome : '-') }}</span>
+                       <span class="badge-purple">{{ item.nomeResponsavel || (item.responsavel ? item.responsavel.nome : 'Sem professor') }}</span>
                    </td>
 
                    <td class="p-3 md:p-6 text-right flex justify-end gap-2">
@@ -382,10 +431,40 @@ function logout() {
 
       <div v-else class="bg-white rounded-[20px] md:rounded-[30px] shadow-sm border-2 border-white overflow-hidden min-h-[500px]">
          
+         <div class="p-4 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-4">
+             <div class="flex items-center gap-2">
+                 <Filter size="16" class="text-gray-400"/>
+                 <span class="text-xs font-bold text-gray-500 uppercase">Filtros:</span>
+             </div>
+             
+             <div class="flex items-center gap-2">
+                 <span class="text-xs font-bold text-gray-400">De:</span>
+                 <input v-model="filtrosHist.dataInicio" type="date" class="input-filter">
+             </div>
+             <div class="flex items-center gap-2">
+                 <span class="text-xs font-bold text-gray-400">Até:</span>
+                 <input v-model="filtrosHist.dataFim" type="date" class="input-filter">
+             </div>
+
+             <div class="flex items-center gap-2">
+                 <span class="text-xs font-bold text-gray-400">Tipo:</span>
+                 <select v-model="filtrosHist.tipo" class="input-filter">
+                     <option value="">Todos</option>
+                     <option v-for="t in (subTab === 'atividades' ? tiposAtividade : tiposEmocao)" :key="t" :value="t">{{ t }}</option>
+                 </select>
+             </div>
+
+             <div class="flex items-center gap-2 flex-1">
+                 <input v-model="filtrosHist.conteudo" type="text" :placeholder="subTab === 'atividades' ? 'Filtrar conteúdo...' : 'Filtrar relato...'" class="input-filter w-full">
+             </div>
+
+             <button @click="limparFiltrosHistorico" class="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 text-gray-500" title="Limpar Filtros"><Eraser size="16"/></button>
+         </div>
+
          <div v-if="subTab === 'atividades'">
              <div class="p-4 md:p-6 bg-green-50/30 border-b border-green-50 flex justify-between items-center">
-                 <h3 class="font-bold text-green-700 flex items-center gap-2 text-sm md:text-base"><BookOpen size="20"/> Jogos Realizados</h3>
-                 <span class="text-xs md:text-sm font-bold text-gray-400">{{ historicoJogos.length }} registros</span>
+                 <h3 class="font-bold text-green-700 flex items-center gap-2 text-sm md:text-base"><BookOpen size="20"/> Jogos e Atividades Realizadas</h3>
+                 <span class="text-xs md:text-sm font-bold text-gray-400">{{ historicoJogosFiltrados.length }} registros</span>
              </div>
              <div class="overflow-x-auto">
                <table class="w-full text-left min-w-[600px]">
@@ -398,7 +477,7 @@ function logout() {
                      </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-50">
-                     <tr v-for="jogo in historicoJogos" :key="jogo.id" class="hover:bg-gray-50">
+                     <tr v-for="jogo in historicoJogosFiltrados" :key="jogo.id" class="hover:bg-gray-50">
                         <td class="p-3 md:p-6 font-bold text-gray-500 text-sm">{{ formatarData(jogo.dataRealizacao) }}</td>
                         <td class="p-3 md:p-6 font-bold text-indigo-600 text-sm">{{ jogo.tipo }}</td>
                         <td class="p-3 md:p-6 font-bold text-gray-700 text-sm">{{ jogo.conteudo }}</td>
@@ -407,6 +486,9 @@ function logout() {
                             <button @click="excluir(jogo.id)" class="icon-btn text-red-400"><Trash2 size="18"/></button>
                         </td>
                      </tr>
+                     <tr v-if="historicoJogosFiltrados.length === 0">
+                         <td colspan="4" class="p-6 text-center text-gray-400 font-bold text-sm">Nenhum registro encontrado com esses filtros.</td>
+                     </tr>
                   </tbody>
                </table>
              </div>
@@ -414,8 +496,8 @@ function logout() {
 
          <div v-if="subTab === 'diarios'">
              <div class="p-4 md:p-6 bg-blue-50/30 border-b border-blue-50 flex justify-between items-center">
-                 <h3 class="font-bold text-blue-700 flex items-center gap-2 text-sm md:text-base"><Database size="20"/> Registros de Emoções</h3>
-                 <span class="text-xs md:text-sm font-bold text-gray-400">{{ historicoDiarios.length }} registros</span>
+                 <h3 class="font-bold text-blue-700 flex items-center gap-2 text-sm md:text-base"><Database size="20"/> Diários e Emoções</h3>
+                 <span class="text-xs md:text-sm font-bold text-gray-400">{{ historicoDiariosFiltrados.length }} registros</span>
              </div>
              <div class="overflow-x-auto">
                <table class="w-full text-left min-w-[600px]">
@@ -428,7 +510,7 @@ function logout() {
                      </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-50">
-                     <tr v-for="diario in historicoDiarios" :key="diario.id" class="hover:bg-gray-50">
+                     <tr v-for="diario in historicoDiariosFiltrados" :key="diario.id" class="hover:bg-gray-50">
                         <td class="p-3 md:p-6 font-bold text-gray-500 text-sm">{{ formatarData(diario.dataRegistro) }}</td>
                         <td class="p-3 md:p-6">
                             <span class="badge-indigo">{{ diario.emocao }} ({{ diario.intensidade }})</span>
@@ -438,6 +520,9 @@ function logout() {
                             <button @click="abrirModalEditarHistorico(diario)" class="icon-btn text-indigo-400"><Edit2 size="18"/></button>
                             <button @click="excluir(diario.id)" class="icon-btn text-red-400"><Trash2 size="18"/></button>
                         </td>
+                     </tr>
+                     <tr v-if="historicoDiariosFiltrados.length === 0">
+                         <td colspan="4" class="p-6 text-center text-gray-400 font-bold text-sm">Nenhum registro encontrado com esses filtros.</td>
                      </tr>
                   </tbody>
                </table>
@@ -465,13 +550,13 @@ function logout() {
                     <div><label class="label">Senha</label><input v-model="itemEmEdicao.senha" type="password" class="input"></div>
                     <div><label class="label">Perfil</label>
                        <select v-model="itemEmEdicao.perfil" class="input">
-                          <option value="RESPONSAVEL">RESPONSAVEL</option><option value="ADMINISTRADOR">ADMIN</option>
+                          <option value="RESPONSAVEL">RESPONSAVEL (Professor)</option><option value="ADMINISTRADOR">ADMIN</option>
                        </select>
                     </div>
                  </template>
                  <template v-if="activeTab === 'alunos'">
                     <div><label class="label">Nome do Aluno</label><input v-model="itemEmEdicao.nome" class="input"></div>
-                    <div><label class="label">Responsável</label>
+                    <div><label class="label">Selecione o Professor(a)</label>
                        <select v-model="itemEmEdicao.responsavel.id" class="input">
                           <option disabled value="">Selecione...</option>
                           <option v-for="p in listaPais" :value="p.id" :key="p.id">{{ p.nome }}</option>
@@ -489,8 +574,7 @@ function logout() {
                  <template v-if="subTab === 'atividades'">
                     <div><label class="label">Tipo de Jogo</label>
                         <select v-model="itemEmEdicao.tipo" class="input">
-                            <option value="VOGAL">VOGAL</option><option value="NUMERO">NUMERO</option>
-                            <option value="ALFABETO">ALFABETO</option><option value="OUTRO">OUTRO</option>
+                            <option v-for="t in tiposAtividade" :key="t" :value="t">{{ t }}</option>
                         </select>
                     </div>
                     <div><label class="label">Conteúdo</label><input v-model="itemEmEdicao.conteudo" class="input"></div>
@@ -500,9 +584,7 @@ function logout() {
                  <template v-if="subTab === 'diarios'">
                     <div><label class="label">Emoção</label>
                        <select v-model="itemEmEdicao.emocao" class="input">
-                          <option value="FELIZ">FELIZ</option><option value="TRISTE">TRISTE</option>
-                          <option value="BRAVO">BRAVO</option><option value="MEDO">MEDO</option>
-                          <option value="NOJINHO">NOJINHO</option><option value="CALMO">CALMO</option>
+                          <option v-for="e in tiposEmocao" :key="e" :value="e">{{ e }}</option>
                        </select>
                     </div>
                     <div><label class="label">Intensidade (1-5)</label><input v-model="itemEmEdicao.intensidade" type="number" min="1" max="5" class="input"></div>
@@ -527,6 +609,7 @@ function logout() {
 .font-nunito { font-family: 'Nunito', sans-serif; }
 .label { @apply block text-sm font-bold text-gray-500 mb-1; }
 .input { @apply w-full p-3 bg-gray-50 rounded-xl border border-gray-200 outline-none focus:border-indigo-500 font-bold text-gray-700 text-sm md:text-base; }
+.input-filter { @apply p-2 bg-white rounded-lg border border-gray-200 outline-none focus:border-indigo-500 font-bold text-gray-600 text-xs; }
 .btn-primary { @apply px-4 md:px-6 py-3 bg-indigo-600 text-white rounded-[15px] font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 flex items-center gap-2 transition-all text-sm md:text-base; }
 .icon-btn { @apply p-2 rounded-lg hover:bg-gray-100 transition-colors; }
 .badge-indigo { @apply text-[10px] md:text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-md font-bold; }
