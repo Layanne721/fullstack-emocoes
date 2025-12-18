@@ -132,21 +132,45 @@ function abrirModalNovoHistorico() {
         dependente: { id: alunoSelecionado.value.id } 
     };
 
+    // CORREÇÃO: Usar fuso horário local para o input datetime-local
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    const dataLocal = now.toISOString().slice(0, 16);
+
     if (subTab.value === 'atividades') {
         itemEmEdicao.value.tipo = 'VOGAL';
-        itemEmEdicao.value.dataRealizacao = new Date().toISOString().slice(0, 16);
+        itemEmEdicao.value.dataRealizacao = dataLocal;
     } else {
         itemEmEdicao.value.emocao = 'FELIZ';
         itemEmEdicao.value.intensidade = 3;
-        itemEmEdicao.value.dataRegistro = new Date().toISOString().slice(0, 16);
+        itemEmEdicao.value.dataRegistro = dataLocal;
     }
     modalFormAberto.value = true;
 }
 
+// CORREÇÃO: Função auxiliar para formatar array [y,m,d,h,m] ou string ISO para input HTML
+function formatarParaInput(data) {
+    if (!data) return '';
+    // Se for array do Java [ano, mes, dia, hora, min, seg]
+    if (Array.isArray(data)) {
+        const y = data[0];
+        const m = String(data[1]).padStart(2, '0');
+        const d = String(data[2]).padStart(2, '0');
+        const h = String(data[3] || 0).padStart(2, '0');
+        const min = String(data[4] || 0).padStart(2, '0');
+        return `${y}-${m}-${d}T${h}:${min}`;
+    }
+    // Se já for string (ex: ISO), corta para YYYY-MM-DDTHH:MM
+    return String(data).slice(0, 16);
+}
+
 function abrirModalEditarHistorico(item) {
     itemEmEdicao.value = JSON.parse(JSON.stringify(item));
-    if (itemEmEdicao.value.dataRealizacao) itemEmEdicao.value.dataRealizacao = itemEmEdicao.value.dataRealizacao.slice(0,16);
-    if (itemEmEdicao.value.dataRegistro) itemEmEdicao.value.dataRegistro = itemEmEdicao.value.dataRegistro.slice(0,16);
+    
+    // CORREÇÃO: Aplica a formatação correta para o input não ficar vazio
+    itemEmEdicao.value.dataRealizacao = formatarParaInput(itemEmEdicao.value.dataRealizacao);
+    itemEmEdicao.value.dataRegistro = formatarParaInput(itemEmEdicao.value.dataRegistro);
+
     if (!itemEmEdicao.value.aluno) itemEmEdicao.value.aluno = { id: alunoSelecionado.value.id };
     modalFormAberto.value = true;
 }
