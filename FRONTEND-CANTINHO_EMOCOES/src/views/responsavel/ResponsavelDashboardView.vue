@@ -22,7 +22,7 @@ const tiposAtividade = [
     { label: 'Livre', value: 'LIVRE' }
 ];
 
-// --- LISTA DE AVATARES DISPONÍVEIS ---
+// --- LISTA DE AVATARES ---
 const listaAvatares = [
     'https://api.dicebear.com/7.x/adventurer/svg?seed=Felix',
     'https://api.dicebear.com/7.x/adventurer/svg?seed=Aneka',
@@ -38,7 +38,7 @@ const listaAvatares = [
     'https://api.dicebear.com/7.x/adventurer/svg?seed=Molly'
 ];
 
-// --- BANCO DE DADOS VISUAL COMPLETO ---
+// --- BANCO DE DADOS VISUAL ---
 const listaFormas = [
     { label: 'Círculo', valor: 'Círculo', path: 'M12 2 A10 10 0 1 1 12 22 A10 10 0 1 1 12 2 Z' },
     { label: 'Quadrado', valor: 'Quadrado', path: 'M3 3 H21 V21 H3 Z' },
@@ -113,6 +113,11 @@ const dadosTurma = ref([]);
 const abaMobile = ref('painel'); 
 const termoBusca = ref(''); 
 
+// FILTRO DE DATA (NOVO)
+// Inicializa com os últimos 7 dias por padrão
+const filtroDataInicio = ref(new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0]);
+const filtroDataFim = ref(new Date().toISOString().split('T')[0]);
+
 // Form Semanário
 const formSemanario = ref({ segunda: '', terca: '', quarta: '', quinta: '', sexta: '', objetivos: [] });
 const salvandoSemanario = ref(false);
@@ -125,7 +130,6 @@ const novoDiario = ref({ emocao: null, intensidade: 3, relato: '' });
 const salvandoDiario = ref(false);
 
 // Dashboard
-const filtroTempo = ref('semana');
 const dadosDashboard = ref(null);
 const registrosDiario = ref([]); 
 const listaAtividades = ref([]);
@@ -159,7 +163,7 @@ const showTeacherModal = ref(false);
 const professorForm = ref({ nome: authStore.user?.name || '', avatarUrl: authStore.user?.avatarUrl || '' });
 const salvandoProfessor = ref(false);
 
-// --- FUNÇÃO DE AJUDA PARA DATAS (CORREÇÃO) ---
+// --- HELPER DE DATA (CORREÇÃO DE ARRAY vs STRING) ---
 function parseData(data) {
     if (!data) return new Date();
     // Verifica se é array do Java [ano, mes, dia, hora, min, seg]
@@ -171,6 +175,20 @@ function parseData(data) {
     return new Date(data);
 }
 
+// --- FUNÇÃO PARA MOVER O PERÍODO DE DATA ---
+function moverPeriodo(dias) {
+    const inicio = new Date(filtroDataInicio.value);
+    const fim = new Date(filtroDataFim.value);
+    
+    // Adiciona os dias (pode ser negativo para voltar)
+    inicio.setDate(inicio.getDate() + dias);
+    fim.setDate(fim.getDate() + dias);
+    
+    // Atualiza os inputs
+    filtroDataInicio.value = inicio.toISOString().split('T')[0];
+    filtroDataFim.value = fim.toISOString().split('T')[0];
+}
+
 // --- COMPUTEDS ---
 const alunosFiltrados = computed(() => {
     if (!termoBusca.value) return dadosTurma.value;
@@ -180,7 +198,6 @@ const alunosFiltrados = computed(() => {
 
 const atividadesEscolares = computed(() => {
     if (!listaAtividades.value) return [];
-    // Usa parseData para garantir a ordenação correta
     return listaAtividades.value
         .filter(a => a.tipo !== 'LIVRE')
         .sort((a, b) => parseData(b.dataRealizacao) - parseData(a.dataRealizacao));
@@ -510,31 +527,43 @@ const chartDataTurma = computed(() => {
 
 const chartOptionsTurma = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: true, grid: { display: false } }, y: { beginAtZero: true, stacked: true } } };
 
-// --- CORREÇÃO DO GRÁFICO DE ATIVIDADES ---
+// --- CORREÇÃO DO GRÁFICO DE ATIVIDADES PARA USAR FILTRO DE DATA ---
 const chartDataAtividades = computed(() => {
     const atividadesPorData = {};
     const dias = [];
-    const hoje = new Date();
-    // Gera as chaves dos últimos 7 dias
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date(); d.setDate(hoje.getDate() - i);
-        const key = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-        atividadesPorData[key] = 0; dias.push(key);
+    
+    // Converte strings de input para objetos Date
+    // Adiciona "T00:00" para garantir o início do dia no fuso local
+    const dataInicio = new Date(filtroDataInicio.value + 'T00:00:00');
+    const dataFim = new Date(filtroDataFim.value + 'T23:59:59');
+    
+    // Loop para gerar todos os dias entre Início e Fim
+    // Clona dataInicio para não alterar a original
+    let loopData = new Date(dataInicio);
+    
+    while (loopData <= dataFim) {
+        const key = loopData.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        atividadesPorData[key] = 0;
+        dias.push(key);
+        // Avança 1 dia
+        loopData.setDate(loopData.getDate() + 1);
     }
     
     if (listaAtividades.value) {
         listaAtividades.value.forEach(ativ => {
-            // Usa parseData para garantir leitura correta de array ou string
             const dataObj = parseData(ativ.dataRealizacao);
             if (!isNaN(dataObj)) {
-                const d = dataObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                if (atividadesPorData[d] !== undefined) atividadesPorData[d]++;
+                // Verifica se a data da atividade está dentro do intervalo
+                if (dataObj >= dataInicio && dataObj <= dataFim) {
+                    const d = dataObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                    if (atividadesPorData[d] !== undefined) atividadesPorData[d]++;
+                }
             }
         });
     }
     return {
         labels: dias,
-        datasets: [{ label: 'Atividades Entregues (Geral)', data: dias.map(d => atividadesPorData[d]), backgroundColor: '#10B981', borderRadius: 6, barThickness: 20 }]
+        datasets: [{ label: 'Atividades Entregues', data: dias.map(d => atividadesPorData[d]), backgroundColor: '#10B981', borderRadius: 6, barThickness: 15 }]
     };
 });
 
@@ -552,7 +581,7 @@ const chartDataEmocoes = computed(() => {
 const chartOptionsEmocoes = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 7, grid: { display: true, borderDash: [5, 5] }, ticks: { callback: function(value) { return valueEmotionLabel[value] || ''; } } }, x: { grid: { display: false } } } };
 const chartOptionsCommon = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { display: false }, ticks: { stepSize: 1 } }, x: { grid: { display: false } } } };
 
-// SUGESTÃO PEDAGÓGICA (Adicionado da V1)
+// SUGESTÃO PEDAGÓGICA
 const sugestaoPedagogica = computed(() => {
     const registros = dadosDashboard.value?.historicoGrafico || [];
     if (registros.length === 0) return null;
@@ -860,8 +889,24 @@ watch([subTabAvaliacao, abaAlunoAtual], async () => {
                             <div class="text-2xl">💡</div><div><h4 class="font-bold text-sm uppercase opacity-80">Sugestão Pedagógica</h4><p class="font-bold">{{ sugestaoPedagogica.texto }}</p></div>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm h-64 md:h-80"><h4 class="text-xs font-black text-gray-400 uppercase mb-4">Entregas</h4><Bar :data="chartDataAtividades" :options="chartOptionsCommon" /></div>
-                            <div class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm h-64 md:h-80"><h4 class="text-xs font-black text-gray-400 uppercase mb-4">Oscilação Emocional (Valência)</h4><Line :data="chartDataEmocoes" :options="chartOptionsEmocoes" :plugins="[emojiPlugin]" /></div>
+                            
+                            <div class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm h-auto md:h-96 flex flex-col">
+                                <div class="flex flex-wrap items-center justify-between mb-4 gap-2">
+                                    <h4 class="text-xs font-black text-gray-400 uppercase">Entregas</h4>
+                                    <div class="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200">
+                                        <button @click="moverPeriodo(-7)" class="w-6 h-6 flex items-center justify-center rounded hover:bg-white hover:shadow-sm text-gray-500 font-bold" title="Voltar 7 dias">‹</button>
+                                        <input type="date" v-model="filtroDataInicio" class="bg-transparent border-none text-[10px] font-bold text-gray-600 focus:ring-0 w-20">
+                                        <span class="text-[10px] text-gray-400">até</span>
+                                        <input type="date" v-model="filtroDataFim" class="bg-transparent border-none text-[10px] font-bold text-gray-600 focus:ring-0 w-20">
+                                        <button @click="moverPeriodo(7)" class="w-6 h-6 flex items-center justify-center rounded hover:bg-white hover:shadow-sm text-gray-500 font-bold" title="Avançar 7 dias">›</button>
+                                    </div>
+                                </div>
+                                <div class="flex-1 relative min-h-[200px]">
+                                    <Bar :data="chartDataAtividades" :options="chartOptionsCommon" />
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm h-64 md:h-96"><h4 class="text-xs font-black text-gray-400 uppercase mb-4">Oscilação Emocional (Valência)</h4><Line :data="chartDataEmocoes" :options="chartOptionsEmocoes" :plugins="[emojiPlugin]" /></div>
                         </div>
                         
                         <div>
